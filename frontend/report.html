@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>报告详情 - EchoMind</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600&family=Noto+Serif+SC:wght@600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="toast-container" class="toast-container"></div>
+  <div class="loading-overlay" id="loading">
+    <div class="loading-page">
+      <div class="loading-spinner"></div>
+      <span class="loading-text">加载中...</span>
+    </div>
+  </div>
+  
+  <script src="api.js"></script>
+  <script src="layout.js"></script>
+  <script src="report.js"></script>
+  <script>
+    whenLayoutReady(initReport);
+  </script>
+</body>
+</html>

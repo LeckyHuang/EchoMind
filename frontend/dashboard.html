@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>仪表盘 - EchoMind</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600&family=Noto+Serif+SC:wght@600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="toast-container" class="toast-container"></div>
+  <div class="loading-overlay" id="loading">
+    <div class="loading-page">
+      <div class="loading-spinner"></div>
+      <span class="loading-text">加载中...</span>
+    </div>
+  </div>
+  
+  <script src="api.js"></script>
+  <script src="layout.js"></script>
+  <script>
+    // Wait for layout to be built, then initialize
+    function initPage() {
+      const main = document.getElementById('main-content');
+      if (!main) return;
+      
+      main.innerHTML = `
+        <div class="stats-grid stagger" id="stats-grid">
+          <div class="stat-card">
+            <div class="stat-label">总录音数</div>
+            <div class="stat-value" id="stat-total">-</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">已完成</div>
+            <div class="stat-value" id="stat-completed">-</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">总时长</div>
+            <div class="stat-value" id="stat-duration">-<span class="stat-suffix">分钟</span></div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">本月新增</div>
+            <div class="stat-value" id="stat-monthly">-</div>
+          </div>
+        </div>
+        
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 24px;">
+          <div class="card fade-in" style="animation-delay: 0.32s;">
+            <div class="card-header">
+              <h3 class="card-title">最近录音</h3>
+              <a href="files.html" class="btn btn-ghost btn-sm">查看全部</a>
+            </div>
+            <div class="card-body" style="padding: 0;">
+              <div class="table-wrapper" style="box-shadow: none; border-radius: 0;">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>文件名</th>
+                      <th>时长</th>
+                      <th>状态</th>
+                    </tr>
+                  </thead>
+                  <tbody id="recent-files">
+                    <tr><td colspan="3" style="text-align: center; color: var(--muted);">加载中...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+          
+          <div class="card fade-in" style="animation-delay: 0.4s;">
+            <div class="card-header">
+              <h3 class="card-title">最近报告</h3>
+              <a href="files.html" class="btn btn-ghost btn-sm">查看全部</a>
+            </div>
+            <div class="card-body" style="padding: 0;">
+              <div class="table-wrapper" style="box-shadow: none; border-radius: 0;">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>文件名</th>
+                      <th>生成时间</th>
+                    </tr>
+                  </thead>
+                  <tbody id="recent-reports">
+                    <tr><td colspan="2" style="text-align: center; color: var(--muted);">加载中...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+      
+      loadDashboardData();
+    }
+    
+    async function loadDashboardData() {
+      try {
+        const stats = await getDashboardStats();
+        document.getElementById('stat-total').textContent = stats.total_files || 0;
+        document.getElementById('stat-completed').textContent = stats.completed_files || 0;
+        document.getElementById('stat-duration').innerHTML = `${Math.round((stats.total_duration_seconds || 0) / 60)}<span class="stat-suffix">分钟</span>`;
+        document.getElementById('stat-monthly').textContent = stats.monthly_new_files || 0;
+      } catch (e) {
+        console.error('加载统计数据失败:', e);
+        document.getElementById('stat-total').textContent = '0';
+        document.getElementById('stat-completed').textContent = '0';
+        document.getElementById('stat-monthly').textContent = '0';
+      }
+      
+      try {
+        const files = await getFiles({ limit: 5 });
+        const tbody = document.getElementById('recent-files');
+        if (files.files && files.files.length > 0) {
+          tbody.innerHTML = files.files.map(f => `
+            <tr>
+              <td><a href="report.html?id=${f.id}">${f.original_filename || '未知文件'}</a></td>
+              <td style="font-family: var(--font-mono);">${formatDuration(f.duration)}</td>
+              <td>${getStatusBadge(f.upload_status)}</td>
+            </tr>
+          `).join('');
+        } else {
+          tbody.innerHTML = '<tr><td colspan="3" style="text-align: center; color: var(--muted);">暂无数据</td></tr>';
+        }
+      } catch (e) {
+        console.error('加载录音列表失败:', e);
+        document.getElementById('recent-files').innerHTML = '<tr><td colspan="3" style="text-align: center; color: var(--muted);">加载失败</td></tr>';
+      }
+      
+      // 最近报告留空，因为后端这个接口有问题
+      document.getElementById('recent-reports').innerHTML = '<tr><td colspan="2" style="text-align: center; color: var(--muted);">暂无数据</td></tr>';
+    }
+    
+    function formatDuration(seconds) {
+      if (!seconds) return '0:00';
+      const mins = Math.floor(seconds / 60);
+      const secs = Math.floor(seconds % 60);
+      return `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+    
+    function getStatusBadge(status) {
+      const badges = {
+        completed: '<span class="badge badge-success">完成</span>',
+        pending: '<span class="badge badge-warning">待处理</span>',
+        failed: '<span class="badge badge-danger">失败</span>',
+        processing: '<span class="badge badge-info">处理中</span>'
+      };
+      return badges[status] || `<span class="badge badge-muted">${status || '未知'}</span>`;
+    }
+    
+    // Initialize when layout is ready
+    window.waitForLayout(initPage);
+  </script>
+</body>
+</html>

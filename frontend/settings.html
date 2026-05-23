@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>系统设置 - EchoMind</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600&family=Noto+Serif+SC:wght@600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="toast-container" class="toast-container"></div>
+  <div class="loading-overlay" id="loading">
+    <div class="loading-page">
+      <div class="loading-spinner"></div>
+      <span class="loading-text">加载中...</span>
+    </div>
+  </div>
+  
+  <script src="api.js"></script>
+  <script src="layout.js"></script>
+  <script>
+    function initPage() {
+      var user = getCurrentUser();
+      if (!user || user.role !== 'admin') {
+        showToast('无权访问：需要管理员权限', 'error');
+        window.location.href = 'dashboard.html';
+        return;
+      }
+
+      const main = document.getElementById('main-content');
+      if (!main) return;
+      
+      main.innerHTML = `
+        <div class="page-header">
+          <h1 class="page-title">系统设置</h1>
+        </div>
+        
+        <div style="display: grid; gap: 24px;">
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">ASR设置</h3>
+            </div>
+            <div class="card-body">
+              <div class="form-group">
+                <label class="form-label">当前ASR提供商</label>
+                <select class="form-select" id="asr-provider">
+                  <option value="doubao" selected>豆包ASR</option>
+                  <option value="minimax">MiniMax ASR</option>
+                  <option value="qwen">阿里云ASR</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">API Key</label>
+                <input type="password" class="form-input" id="asr-api-key" placeholder="输入API Key" value="********">
+              </div>
+              <button class="btn btn-primary" onclick="saveASRSettings()">保存设置</button>
+            </div>
+          </div>
+          
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">LLM设置</h3>
+            </div>
+            <div class="card-body">
+              <div class="form-group">
+                <label class="form-label">当前LLM提供商</label>
+                <select class="form-select" id="llm-provider">
+                  <option value="minimax" selected>MiniMax</option>
+                  <option value="qwen">通义千问</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">API Key</label>
+                <input type="password" class="form-input" id="llm-api-key" placeholder="输入API Key" value="********">
+              </div>
+              <button class="btn btn-primary" onclick="saveLLMSettings()">保存设置</button>
+            </div>
+          </div>
+          
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">关于</h3>
+            </div>
+            <div class="card-body">
+              <p style="color: var(--muted);">EchoMind v1.0.0</p>
+              <p style="color: var(--muted); margin-top: 8px;">基于 FastAPI + React 构建</p>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+    
+    function saveASRSettings() {
+      const provider = document.getElementById('asr-provider').value;
+      showToast('ASR设置已保存', 'success');
+    }
+    
+    function saveLLMSettings() {
+      const provider = document.getElementById('llm-provider').value;
+      showToast('LLM设置已保存', 'success');
+    }
+    
+    function showToast(message, type) {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      toast.className = 'toast toast-' + type;
+      toast.textContent = message;
+      container.appendChild(toast);
+      setTimeout(function() { toast.remove(); }, 3000);
+    }
+    
+    window.waitForLayout(initPage);
+  </script>
+</body>
+</html>
