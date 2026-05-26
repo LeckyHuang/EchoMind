@@ -1,11 +1,15 @@
 // ==================== 报告详情页 ====================
-// 通过 file_id 加载，展示三份报告：参观简报 / 商机简报 / 接待复盘
+// 通过 file_id 加载，动态读取任务类型并展示对应报告
 
-const REPORT_TYPES = {
+// 三种内置类型的固定配置（保留向后兼容）
+const BUILTIN_REPORT_TYPES = {
   customer_brief:       { label: '参观简报', desc: '官方报道风格' },
   business_opportunity: { label: '商机简报', desc: '发给客户经理' },
   reception_review:     { label: '接待复盘', desc: '运营团队参考' },
 };
+
+// 运行时从 API 动态填充（含内置 + 自定义类型）
+let REPORT_TYPES = {};
 
 // 当前加载的报告数据（含 report_id，用于编辑/分享操作）
 let currentReports = {};
@@ -25,6 +29,24 @@ async function initReport() {
     showToast('未指定文件ID', 'error');
     window.location.href = 'files.html';
     return;
+  }
+
+  // 动态加载任务类型（先于页面渲染）
+  try {
+    const typesData = await fetch('/api/v1/task-types').then(r => r.json());
+    REPORT_TYPES = {};
+    (typesData.task_types || []).forEach(t => {
+      REPORT_TYPES[t.name] = {
+        label: t.display_name || t.name,
+        desc:  t.description || ''
+      };
+    });
+  } catch (e) {
+    console.warn('拉取任务类型失败，回退到内置类型', e);
+  }
+  // fallback：如果 API 拿不到任何类型，使用内置三种
+  if (Object.keys(REPORT_TYPES).length === 0) {
+    REPORT_TYPES = { ...BUILTIN_REPORT_TYPES };
   }
 
   setPageTitle('报告详情');
@@ -359,9 +381,118 @@ function renderReportByType(type, data, userEdits) {
     case 'customer_brief':       html = renderCustomerBrief(data, userEdits); break;
     case 'business_opportunity': html = renderBusinessOpportunity(data, userEdits); break;
     case 'reception_review':     html = renderReceptionReview(data, userEdits); break;
-    default: html = renderRawJson(data);
+    default: html = renderGenericReport(data); break;
   }
   return `<div style="font-size:13px;">${html}</div>`;
+}
+
+// ==================== 通用类型渲染（sections 格式）====================
+
+function renderGenericReport(d) {
+  if (!d) return '<p style="color:var(--muted)">暂无数据</p>';
+
+  // 如果数据有 sections 字段（标准通用格式）
+  if (d.sections && Array.isArray(d.sections)) {
+    return d.sections.map(sec => renderGenericSection(sec)).join('');
+  }
+
+  // 兼容：如果是纯文本 summary
+  if (typeof d === 'string') {
+    return `<div style="line-height:1.8;white-space:pre-wrap;">${escapeHtml(d)}</div>`;
+  }
+
+  // 最终兜底：原始 JSON 展示
+  return renderRawJson(d);
+}
+
+function renderGenericSection(sec) {
+  if (!sec || !sec.type) return '';
+  const title = sec.title || '';
+
+  switch (sec.type) {
+    case 'text':
+      return `
+        <div class="collapsible open" style="margin-bottom:16px;">
+          <div class="collapsible-header" onclick="toggleCollapsible(this)">
+            <span>${escapeHtml(title)}</span>
+            <svg class="collapsible-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+          </div>
+          <div class="collapsible-body"><div class="collapsible-content" style="line-height:1.8;white-space:pre-wrap;">${escapeHtml(sec.content || '')}</div></div>
+        </div>`;
+
+    case 'list':
+      if (!sec.items || !sec.items.length) return '';
+      return `
+        <div class="collapsible open" style="margin-bottom:16px;">
+          <div class="collapsible-header" onclick="toggleCollapsible(this)">
+            <span>${escapeHtml(title)} (${sec.items.length})</span>
+            <svg class="collapsible-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+          </div>
+          <div class="collapsible-body"><div class="collapsible-content">
+            <ul style="margin-left:20px;line-height:2.2;">
+              ${sec.items.map(i => `<li>${escapeHtml(String(i))}</li>`).join('')}
+            </ul>
+          </div></div>
+        </div>`;
+
+    case 'kv':
+      if (!sec.items || !sec.items.length) return '';
+      return `
+        <div class="collapsible open" style="margin-bottom:16px;">
+          <div class="collapsible-header" onclick="toggleCollapsible(this)">
+            <span>${escapeHtml(title)}</span>
+            <svg class="collapsible-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+          </div>
+          <div class="collapsible-body"><div class="collapsible-content">
+            <div class="info-list">
+              ${sec.items.map(kv => `
+                <div class="info-item">
+                  <span class="info-label">${escapeHtml(kv.label || '')}</span>
+                  <span class="info-value">${escapeHtml(kv.value || '')}</span>
+                </div>`).join('')}
+            </div>
+          </div></div>
+        </div>`;
+
+    case 'tags':
+      if (!sec.items || !sec.items.length) return '';
+      return `
+        <div class="collapsible open" style="margin-bottom:16px;">
+          <div class="collapsible-header" onclick="toggleCollapsible(this)">
+            <span>${escapeHtml(title)}</span>
+            <svg class="collapsible-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+          </div>
+          <div class="collapsible-body"><div class="collapsible-content" style="padding:8px 0;">
+            ${sec.items.map(i => `<span class="badge badge-accent" style="margin:3px;">${escapeHtml(String(i))}</span>`).join('')}
+          </div></div>
+        </div>`;
+
+    case 'actions':
+      if (!sec.items || !sec.items.length) return '';
+      return `
+        <div class="collapsible open" style="margin-bottom:16px;">
+          <div class="collapsible-header" onclick="toggleCollapsible(this)">
+            <span>${escapeHtml(title)} (${sec.items.length})</span>
+            <svg class="collapsible-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+          </div>
+          <div class="collapsible-body"><div class="collapsible-content">
+            <ul style="margin-left:20px;line-height:2.2;">
+              ${sec.items.map(a => {
+                const pri = a.priority || '';
+                const badgeCls = pri === '高' ? 'badge-danger' : pri === '中' ? 'badge-warning' : 'badge-muted';
+                return `<li style="margin-bottom:8px;">
+                  ${pri ? `<span class="badge ${badgeCls}" style="margin-right:8px;">${escapeHtml(pri)}</span>` : ''}
+                  <b>${escapeHtml(a.action || '')}</b>
+                  ${a.notes ? `<br><small style="color:var(--muted)">${escapeHtml(a.notes)}</small>` : ''}
+                </li>`;
+              }).join('')}
+            </ul>
+          </div></div>
+        </div>`;
+
+    default:
+      return '';
+  }
 }
 
 // 参观简报渲染
@@ -652,7 +783,11 @@ function renderEditFields(type, data) {
     case 'customer_brief':       return renderCustomerBriefEditFields(data);
     case 'business_opportunity': return renderBusinessOpportunityEditFields(data);
     case 'reception_review':     return renderReceptionReviewEditFields(data);
-    default: return '';
+    default:
+      return `<div style="padding:12px 0;color:var(--muted);font-size:13px;">
+        该类型使用通用报告格式，AI 已自动生成内容。<br>
+        如需补充或修正，请使用下方「补充说明」文字框输入，保存后将附在报告中。
+      </div>`;
   }
 }
 
