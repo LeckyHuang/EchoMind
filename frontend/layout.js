@@ -7,7 +7,6 @@ const NAV_ITEMS = [
   { id: 'files', label: '录音文件', icon: 'files', href: 'files.html' },
   { id: 'reports', label: '分析报告', icon: 'reports', href: 'reports.html' },
   { id: 'task-types', label: '分析类型', icon: 'tasktypes', href: 'task-types.html', adminOnly: true },
-  { id: 'prompts', label: 'Prompt管理', icon: 'prompts', href: 'prompts.html', adminOnly: true },
   { id: 'users', label: '用户管理', icon: 'users', href: 'users.html', adminOnly: true },
   { id: 'settings', label: '系统设置', icon: 'settings', href: 'settings.html', adminOnly: true }
 ];

@@ -1,4 +1,5 @@
-const API_BASE = 'http://183.56.228.31:8001/api/v1';
+// 自动适配当前服务器地址，本地/生产通用，无需手动改 IP
+const API_BASE = window.location.origin + '/api/v1';
 
 // ========================================
 // Auth

@@ -383,8 +383,8 @@ function loadTaskTypesForUpload() {
         : '';
       var borderColor = t.default_rank > 0 ? 'var(--accent)' : 'var(--border)';
       return '<label style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border:1px solid ' + borderColor + ';border-radius:20px;cursor:pointer;font-size:0.85rem;background:var(--surface);">' +
-        '<input type="checkbox" name="task_type_sel" value="' + t.name + '" ' + checked + ' style="width:14px;height:14px;">' +
-        t.display_name + rankLabel +
+        '<input type="checkbox" name="task_type_sel" value="' + escapeHtml(t.name) + '" ' + checked + ' style="width:14px;height:14px;">' +
+        escapeHtml(t.display_name) + rankLabel +
       '</label>';
     }).join('');
   }).catch(function() {

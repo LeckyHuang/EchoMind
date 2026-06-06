@@ -34,8 +34,9 @@ class Settings:
     MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", "100"))  # MB
     FILE_EXPIRE_HOURS = int(os.getenv("FILE_EXPIRE_HOURS", "168"))  # 7天后自动删除
     
-    # CORS
-    CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
+    # CORS（生产环境请设置 CORS_ORIGINS=https://your-domain.com）
+    _cors_raw = os.getenv("CORS_ORIGINS", "").strip()
+    CORS_ORIGINS = [o.strip() for o in _cors_raw.split(",") if o.strip()] if _cors_raw else ["*"]
 
     # SSL（留空则使用 HTTP，填写后自动切换为 HTTPS）
     SSL_CERTFILE = os.getenv("SSL_CERTFILE", "")   # 证书文件路径，如 /path/to/cert.pem

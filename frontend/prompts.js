@@ -130,7 +130,7 @@ function renderInactiveList(prompts, type) {
       <div style="margin-top:12px;display:flex;flex-direction:column;gap:8px;">
         ${prompts.map(p => `
           <div style="background:var(--surface-2);border-radius:6px;padding:12px;display:flex;justify-content:space-between;align-items:center;">
-            <span style="font-size:0.85rem;color:var(--muted);">${p.description || '无描述'} · ${formatDate(p.updated_at)}</span>
+            <span style="font-size:0.85rem;color:var(--muted);">${escapeHtml(p.description || '无描述')} · ${formatDate(p.updated_at)}</span>
             <div style="display:flex;gap:6px;">
               <button class="btn btn-ghost btn-sm" onclick="activatePromptHandler('${p.template_id}', '${type}')">激活</button>
               <button class="btn btn-ghost btn-sm" onclick="showEditPromptModal('${p.template_id}', '${type}')">编辑</button>

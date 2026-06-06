@@ -163,7 +163,7 @@ async function loadFileReports(fileId) {
     document.getElementById('file-info').innerHTML = `
       <div class="info-item">
         <span class="info-label">文件名</span>
-        <span class="info-value">${detail.original_filename || '未知'}</span>
+        <span class="info-value">${escapeHtml(detail.original_filename || '未知')}</span>
       </div>
       <div class="info-item">
         <span class="info-label">时长</span>
@@ -197,7 +197,7 @@ async function loadFileReports(fileId) {
       if (!report) {
         container.innerHTML = '<p style="color:var(--muted);padding:16px 0;">该报告尚未生成</p>';
       } else if (report.status === 'failed') {
-        container.innerHTML = `<div class="badge badge-danger" style="padding:8px 12px;">生成失败：${report.error_message || '未知错误'}</div>`;
+        container.innerHTML = `<div class="badge badge-danger" style="padding:8px 12px;">生成失败：${escapeHtml(report.error_message || '未知错误')}</div>`;
       } else if (report.status === 'completed' && report.data) {
         // 合并 AI 数据和用户编辑数据
         const mergedData = mergeReportData(report.data, report.user_edited_data);
@@ -503,7 +503,7 @@ function renderCustomerBrief(d, userEdits) {
   const nullField = (val, label) =>
     (val === null || val === undefined)
       ? `<span style="color:var(--muted);font-style:italic;border-bottom:1px dashed var(--border);" title="录音无法提取，可在编辑模式补充">待补充</span>`
-      : val;
+      : escapeHtml(String(val));
 
   const isEdited = (key) => ue && ue[key] !== undefined && ue[key] !== null && ue[key] !== '';
 
@@ -537,17 +537,17 @@ function renderCustomerBrief(d, userEdits) {
           </div>
           <div class="info-item">
             <span class="info-label">主要嘉宾</span>
-            <span class="info-value">${guestInfo.key_guests && guestInfo.key_guests.length ? guestInfo.key_guests.join('、') : nullField(null, '主要嘉宾')}</span>
+            <span class="info-value">${guestInfo.key_guests && guestInfo.key_guests.length ? guestInfo.key_guests.map(g => escapeHtml(String(g))).join('、') : nullField(null, '主要嘉宾')}</span>
           </div>
-          ${guestInfo.group_size ? `<div class="info-item"><span class="info-label">来访人数</span><span class="info-value">${guestInfo.group_size}</span></div>` : ''}
-          ${guestInfo.guest_background ? `<div class="info-item"><span class="info-label">来访背景</span><span class="info-value">${guestInfo.guest_background}</span></div>` : ''}
+          ${guestInfo.group_size ? `<div class="info-item"><span class="info-label">来访人数</span><span class="info-value">${escapeHtml(String(guestInfo.group_size))}</span></div>` : ''}
+          ${guestInfo.guest_background ? `<div class="info-item"><span class="info-label">来访背景</span><span class="info-value">${escapeHtml(String(guestInfo.guest_background))}</span></div>` : ''}
         </div>
       </div></div>
     </div>
 
     ${infoCard('活动概述', d.overview)}
 
-    ${d.key_demonstrations && d.key_demonstrations.length ? renderObjectList('重点演示内容', d.key_demonstrations, item => `<b>${item.item}</b>：${item.description || ''}`) : ''}
+    ${d.key_demonstrations && d.key_demonstrations.length ? renderObjectList('重点演示内容', d.key_demonstrations, item => `<b>${escapeHtml(item.item || '')}</b>：${escapeHtml(item.description || '')}`) : ''}
 
     ${(() => {
       const hasFeedback = (guestFeedback.suggestions && guestFeedback.suggestions.length) ||
@@ -563,15 +563,15 @@ function renderCustomerBrief(d, userEdits) {
           <div class="collapsible-body"><div class="collapsible-content">
             ${guestFeedback.highlights && guestFeedback.highlights.length ? `
               <div style="margin-bottom:12px;"><b style="font-size:13px;color:var(--muted);">特别关注</b>
-                <ul style="margin:6px 0 0 20px;line-height:2;">${guestFeedback.highlights.map(i => `<li>${i}</li>`).join('')}</ul>
+                <ul style="margin:6px 0 0 20px;line-height:2;">${guestFeedback.highlights.map(i => `<li>${escapeHtml(String(i))}</li>`).join('')}</ul>
               </div>` : ''}
             ${guestFeedback.suggestions && guestFeedback.suggestions.length ? `
               <div style="margin-bottom:12px;"><b style="font-size:13px;color:var(--muted);">提出建议</b>
-                <ul style="margin:6px 0 0 20px;line-height:2;">${guestFeedback.suggestions.map(i => `<li>${i}</li>`).join('')}</ul>
+                <ul style="margin:6px 0 0 20px;line-height:2;">${guestFeedback.suggestions.map(i => `<li>${escapeHtml(String(i))}</li>`).join('')}</ul>
               </div>` : ''}
             ${guestFeedback.opinions && guestFeedback.opinions.length ? `
               <div><b style="font-size:13px;color:var(--muted);">表达意见</b>
-                <ul style="margin:6px 0 0 20px;line-height:2;">${guestFeedback.opinions.map(i => `<li>${i}</li>`).join('')}</ul>
+                <ul style="margin:6px 0 0 20px;line-height:2;">${guestFeedback.opinions.map(i => `<li>${escapeHtml(String(i))}</li>`).join('')}</ul>
               </div>` : ''}
           </div></div>
         </div>
@@ -618,7 +618,7 @@ function renderBusinessOpportunity(d, userEdits) {
         </div>
         <div class="collapsible-body"><div class="collapsible-content">
           <ul style="margin-left:20px;line-height:2.2;">
-            ${d.questions_asked.map(q => `<li style="margin-bottom:4px;">❓ ${q}</li>`).join('')}
+            ${d.questions_asked.map(q => `<li style="margin-bottom:4px;">❓ ${escapeHtml(String(q))}</li>`).join('')}
           </ul>
         </div></div>
       </div>
@@ -627,7 +627,7 @@ function renderBusinessOpportunity(d, userEdits) {
     ${d.doubts_objections && d.doubts_objections.length ? renderObjectList(
       `客户质疑与顾虑 (${d.doubts_objections.length})`,
       d.doubts_objections,
-      item => `<b>${item.topic}</b>：${item.content || ''}`
+      item => `<b>${escapeHtml(item.topic || '')}</b>：${escapeHtml(item.content || '')}`
     ) : ''}
 
     ${d.interest_points && d.interest_points.length ? `
@@ -637,7 +637,7 @@ function renderBusinessOpportunity(d, userEdits) {
           <svg class="collapsible-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div class="collapsible-body"><div class="collapsible-content">
-          ${d.interest_points.map(i => `<span class="badge badge-accent" style="margin:3px;">${i}</span>`).join('')}
+          ${d.interest_points.map(i => `<span class="badge badge-accent" style="margin:3px;">${escapeHtml(String(i))}</span>`).join('')}
         </div></div>
       </div>
     ` : ''}
@@ -645,19 +645,19 @@ function renderBusinessOpportunity(d, userEdits) {
     ${d.explicit_needs && d.explicit_needs.length ? renderObjectList(
       `显性需求 (${d.explicit_needs.length})`,
       d.explicit_needs,
-      item => `<b>${item.need}</b>${item.detail ? `：${item.detail}` : ''}`
+      item => `<b>${escapeHtml(item.need || '')}</b>${item.detail ? `：${escapeHtml(item.detail)}` : ''}`
     ) : ''}
 
     ${d.hidden_pain_points && d.hidden_pain_points.length ? renderObjectList(
       `潜在痛点（隐性）(${d.hidden_pain_points.length})`,
       d.hidden_pain_points,
-      item => `<b>${item.pain_point}</b><br><small style="color:var(--muted)">推断依据：${item.evidence || ''}</small>`
+      item => `<b>${escapeHtml(item.pain_point || '')}</b><br><small style="color:var(--muted)">推断依据：${escapeHtml(item.evidence || '')}</small>`
     ) : ''}
 
     ${d.next_actions && d.next_actions.length ? renderObjectList(
       `下一步行动 (${d.next_actions.length})`,
       d.next_actions,
-      item => `<span class="badge badge-${item.priority === '高' ? 'danger' : item.priority === '中' ? 'warning' : 'muted'}" style="margin-right:8px;">${item.priority || '-'}</span><b>${item.action}</b>${item.notes ? `<br><small style="color:var(--muted)">${item.notes}</small>` : ''}`
+      item => `<span class="badge badge-${item.priority === '高' ? 'danger' : item.priority === '中' ? 'warning' : 'muted'}" style="margin-right:8px;">${escapeHtml(item.priority || '-')}</span><b>${escapeHtml(item.action || '')}</b>${item.notes ? `<br><small style="color:var(--muted)">${escapeHtml(item.notes)}</small>` : ''}`
     ) : ''}
   `;
 }
@@ -681,7 +681,7 @@ function renderReceptionReview(d, userEdits) {
           <div style="background:#eef7f0;border-radius:var(--radius-sm);padding:14px 16px;">
             <div style="font-size:11px;font-weight:700;color:#4a7c59;letter-spacing:1px;margin-bottom:8px;">接待亮点</div>
             <ul style="margin-left:0;list-style:none;padding:0;">
-              ${d.top_highlights.map(h => `<li style="font-size:13px;padding:4px 0;border-bottom:1px solid #d4eada;color:#2d5a3d;line-height:1.6;">✓ ${escapeHtml(h)}</li>`).join('')}
+              ${d.top_highlights.map(h => `<li style="font-size:13px;padding:4px 0;border-bottom:1px solid #d4eada;color:#2d5a3d;line-height:1.6;">✓ ${escapeHtml(String(h))}</li>`).join('')}
             </ul>
           </div>
         ` : '<div></div>'}
@@ -689,7 +689,7 @@ function renderReceptionReview(d, userEdits) {
           <div style="background:#fff8f0;border-radius:var(--radius-sm);padding:14px 16px;">
             <div style="font-size:11px;font-weight:700;color:#b85c1a;letter-spacing:1px;margin-bottom:8px;">待改进</div>
             <ul style="margin-left:0;list-style:none;padding:0;">
-              ${d.top_improvements.map(i => `<li style="font-size:13px;padding:4px 0;border-bottom:1px solid #f5dfc0;color:#7a4a1a;line-height:1.6;">→ ${escapeHtml(i)}</li>`).join('')}
+              ${d.top_improvements.map(i => `<li style="font-size:13px;padding:4px 0;border-bottom:1px solid #f5dfc0;color:#7a4a1a;line-height:1.6;">→ ${escapeHtml(String(i))}</li>`).join('')}
             </ul>
           </div>
         ` : '<div></div>'}
@@ -704,11 +704,11 @@ function renderReceptionReview(d, userEdits) {
       </div>
       <div class="collapsible-body"><div class="collapsible-content">
         <div class="info-list">
-          ${overview.duration ? `<div class="info-item"><span class="info-label">接待时长</span><span class="info-value">${overview.duration}</span></div>` : ''}
-          ${overview.client_type ? `<div class="info-item"><span class="info-label">客户类型</span><span class="info-value">${overview.client_type}</span></div>` : ''}
-          ${overview.atmosphere ? `<div class="info-item"><span class="info-label">整体氛围</span><span class="info-value">${overview.atmosphere}</span></div>` : ''}
+          ${overview.duration ? `<div class="info-item"><span class="info-label">接待时长</span><span class="info-value">${escapeHtml(String(overview.duration))}</span></div>` : ''}
+          ${overview.client_type ? `<div class="info-item"><span class="info-label">客户类型</span><span class="info-value">${escapeHtml(String(overview.client_type))}</span></div>` : ''}
+          ${overview.atmosphere ? `<div class="info-item"><span class="info-label">整体氛围</span><span class="info-value">${escapeHtml(String(overview.atmosphere))}</span></div>` : ''}
           ${overview.engagement ? `<div class="info-item"><span class="info-label">参与度</span><span class="info-value">
-            <span class="badge badge-${overview.engagement === '高' ? 'success' : overview.engagement === '中' ? 'warning' : 'muted'}">${overview.engagement}</span>
+            <span class="badge badge-${overview.engagement === '高' ? 'success' : overview.engagement === '中' ? 'warning' : 'muted'}">${escapeHtml(String(overview.engagement))}</span>
           </span></div>` : ''}
         </div>
       </div></div>
@@ -717,13 +717,13 @@ function renderReceptionReview(d, userEdits) {
     ${d.effective_aspects && d.effective_aspects.length ? renderObjectList(
       `有效环节 (${d.effective_aspects.length})`,
       d.effective_aspects,
-      item => `<b>${item.aspect}</b>：${item.description || ''}`
+      item => `<b>${escapeHtml(item.aspect || '')}</b>：${escapeHtml(item.description || '')}`
     ) : ''}
 
     ${d.needs_improvement && d.needs_improvement.length ? renderObjectList(
       `需调优环节 (${d.needs_improvement.length})`,
       d.needs_improvement,
-      item => `<span class="badge badge-${item.severity === '高' ? 'danger' : item.severity === '中' ? 'warning' : 'muted'}" style="margin-right:8px;">${item.severity || '-'}</span><b>${item.aspect}</b>：${item.issue || ''}`
+      item => `<span class="badge badge-${item.severity === '高' ? 'danger' : item.severity === '中' ? 'warning' : 'muted'}" style="margin-right:8px;">${escapeHtml(item.severity || '-')}</span><b>${escapeHtml(item.aspect || '')}</b>：${escapeHtml(item.issue || '')}`
     ) : ''}
 
     <!-- 讲解员表现 -->
@@ -734,14 +734,14 @@ function renderReceptionReview(d, userEdits) {
           <svg class="collapsible-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div class="collapsible-body"><div class="collapsible-content">
-          ${guide.overall ? `<p style="line-height:1.8;margin-bottom:12px;">${guide.overall}</p>` : ''}
+          ${guide.overall ? `<p style="line-height:1.8;margin-bottom:12px;">${escapeHtml(String(guide.overall))}</p>` : ''}
           ${guide.highlights && guide.highlights.length ? `
             <div style="margin-bottom:12px;"><b style="font-size:13px;color:var(--success);">✓ 亮点</b>
-              <ul style="margin:6px 0 0 20px;line-height:2;">${guide.highlights.map(h => `<li>${h}</li>`).join('')}</ul>
+              <ul style="margin:6px 0 0 20px;line-height:2;">${guide.highlights.map(h => `<li>${escapeHtml(String(h))}</li>`).join('')}</ul>
             </div>` : ''}
           ${guide.improvements && guide.improvements.length ? `
             <div><b style="font-size:13px;color:var(--warning);">→ 改进方向</b>
-              <ul style="margin:6px 0 0 20px;line-height:2;">${guide.improvements.map(i => `<li>${i}</li>`).join('')}</ul>
+              <ul style="margin:6px 0 0 20px;line-height:2;">${guide.improvements.map(i => `<li>${escapeHtml(String(i))}</li>`).join('')}</ul>
             </div>` : ''}
         </div></div>
       </div>
@@ -750,7 +750,7 @@ function renderReceptionReview(d, userEdits) {
     ${d.optimization_suggestions && d.optimization_suggestions.length ? renderObjectList(
       `优化建议 (${d.optimization_suggestions.length})`,
       d.optimization_suggestions,
-      item => `<span class="badge badge-${item.priority === '高' ? 'danger' : item.priority === '中' ? 'warning' : 'muted'}" style="margin-right:8px;">${item.priority || '-'}</span><b>${item.area}</b>：${item.suggestion || ''}`
+      item => `<span class="badge badge-${item.priority === '高' ? 'danger' : item.priority === '中' ? 'warning' : 'muted'}" style="margin-right:8px;">${escapeHtml(item.priority || '-')}</span><b>${escapeHtml(item.area || '')}</b>：${escapeHtml(item.suggestion || '')}`
     ) : ''}
   `;
 }

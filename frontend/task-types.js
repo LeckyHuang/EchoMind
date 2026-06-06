@@ -28,7 +28,10 @@ function initPage() {
       '</div>' +
       // 已安装类型列表
       '<div>' +
-        '<div style="font-size:0.85rem;font-weight:700;color:var(--text);margin-bottom:12px;">已安装的分析类型</div>' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">' +
+          '<div style="font-size:0.85rem;font-weight:700;color:var(--text);">已安装的分析类型</div>' +
+          '<button class="btn btn-primary btn-sm" onclick="showCreateTypeModal()" style="font-size:0.82rem;">+ 新建类型</button>' +
+        '</div>' +
         '<div id="installed-types-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;"></div>' +
       '</div>' +
     '</div>' +
@@ -151,11 +154,13 @@ function renderInstalledGrid() {
           rankOptions +
         '</select>' +
         '<button class="btn btn-ghost btn-sm" style="font-size:0.8rem;" ' +
-          'onclick="showPromptEditor(\'' + t.type_id + '\',\'' + escHtml(t.display_name) + '\',\'' + escHtml(t.prompt_key || t.name) + '\')">微调 Prompt</button>' +
+          'onclick="showPromptEditor(\'' + t.type_id + '\',\'' + escHtml(t.display_name) + '\',\'' + escHtml(t.prompt_key || t.name) + '\')">编辑 Prompt</button>' +
         '<button class="btn btn-ghost btn-sm" style="font-size:0.8rem;color:' + (t.is_active === false ? 'var(--accent)' : 'var(--danger)') + ';" ' +
           'onclick="toggleActive(\'' + t.type_id + '\',' + (t.is_active !== false) + ')">' +
           (t.is_active === false ? '启用' : '停用') +
         '</button>' +
+        '<button class="btn btn-ghost btn-sm" style="font-size:0.8rem;color:var(--danger);opacity:0.6;" ' +
+          'onclick="deleteType(\'' + t.type_id + '\',\'' + escHtml(t.display_name) + '\')">删除</button>' +
       '</div>' +
     '</div>';
   }).join('');
@@ -304,7 +309,7 @@ function renderPresetLibrary(presets) {
     groups[cat].push(p);
   });
 
-  var catOrder = ['通用', '商业', '洞察', '客户'];
+  var catOrder = ['通用', '商业', '洞察', '客户', '展厅'];
   var html = '';
   catOrder.forEach(function(cat) {
     if (!groups[cat]) return;
@@ -351,6 +356,163 @@ function installPreset(name) {
       loadInstalledTypes();
     })
     .catch(function(e) { showToast('安装失败：' + e.message, 'error'); });
+}
+
+// ==================== 删除类型 ====================
+
+function deleteType(typeId, displayName) {
+  if (!confirm('确认删除「' + displayName + '」？\n\n已生成的报告不受影响，但该类型将无法再用于新的分析。\n\n建议用「停用」代替删除。')) return;
+  apiRequest('/admin/task-types/' + typeId, { method: 'DELETE' })
+    .then(function() {
+      showToast('已删除：' + displayName, 'success');
+      loadInstalledTypes();
+    })
+    .catch(function(e) { showToast('删除失败：' + e.message, 'error'); });
+}
+
+// ==================== 新建自定义类型 ====================
+
+function showCreateTypeModal() {
+  var existing = document.getElementById('create-type-modal');
+  if (existing) existing.remove();
+
+  var modal = document.createElement('div');
+  modal.id = 'create-type-modal';
+  modal.className = 'modal-overlay';
+  modal.innerHTML =
+    '<div class="modal" style="max-width:620px;">' +
+      '<div class="modal-header">' +
+        '<h3 class="modal-title">新建分析类型</h3>' +
+        '<button class="btn btn-ghost btn-icon" onclick="closeCreateTypeModal()">' +
+          '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>' +
+        '</button>' +
+      '</div>' +
+
+      '<div class="modal-body" style="display:flex;flex-direction:column;gap:16px;">' +
+
+        // 类型标识
+        '<div>' +
+          '<label style="font-size:0.82rem;font-weight:600;color:var(--text);display:block;margin-bottom:6px;">' +
+            '类型标识 <span style="color:var(--danger);">*</span>' +
+            '<span style="font-size:0.75rem;font-weight:400;color:var(--muted);margin-left:8px;">英文小写+下划线，如 sales_review，全局唯一</span>' +
+          '</label>' +
+          '<input id="ct-name" type="text" class="form-input" placeholder="例如：sales_review" ' +
+            'style="font-family:var(--font-mono);" ' +
+            'oninput="this.value=this.value.toLowerCase().replace(/[^a-z0-9_]/g,\'\')" />' +
+        '</div>' +
+
+        // 显示名称
+        '<div>' +
+          '<label style="font-size:0.82rem;font-weight:600;color:var(--text);display:block;margin-bottom:6px;">' +
+            '显示名称 <span style="color:var(--danger);">*</span>' +
+            '<span style="font-size:0.75rem;font-weight:400;color:var(--muted);margin-left:8px;">展示给用户的名字，如「销售复盘」</span>' +
+          '</label>' +
+          '<input id="ct-display-name" type="text" class="form-input" placeholder="例如：销售复盘" />' +
+        '</div>' +
+
+        // 描述
+        '<div>' +
+          '<label style="font-size:0.82rem;font-weight:600;color:var(--text);display:block;margin-bottom:6px;">' +
+            '描述' +
+            '<span style="font-size:0.75rem;font-weight:400;color:var(--muted);margin-left:8px;">可选，说明这个类型能分析什么</span>' +
+          '</label>' +
+          '<input id="ct-description" type="text" class="form-input" placeholder="例如：销售录音 → 复盘要点与跟进建议" />' +
+        '</div>' +
+
+        // Prompt
+        '<div>' +
+          '<label style="font-size:0.82rem;font-weight:600;color:var(--text);display:block;margin-bottom:6px;">' +
+            'Prompt 内容 <span style="color:var(--danger);">*</span>' +
+            '<span style="font-size:0.75rem;font-weight:400;color:var(--muted);margin-left:8px;">' +
+              '必须包含 <code style="background:var(--surface);padding:1px 5px;border-radius:3px;">{text}</code> 作为录音文本占位符' +
+            '</span>' +
+          '</label>' +
+          '<textarea id="ct-prompt" class="form-input" rows="10" ' +
+            'style="font-family:var(--font-mono);font-size:0.82rem;resize:vertical;line-height:1.6;" ' +
+            'placeholder="你是一位专业的销售分析师。\n\n请分析以下销售录音，输出 JSON 格式：\n{\"title\": \"销售复盘\", \"sections\": [\n  {\"type\": \"list\", \"title\": \"关键问题\", \"items\": [...]},\n  {\"type\": \"kv\",   \"title\": \"客户画像\", \"items\": [{\"label\":\"需求\",\"value\":\"...\"}]},\n  {\"type\": \"actions\", \"title\": \"跟进行动\", \"items\": [{\"action\":\"...\",\"priority\":\"高\",\"notes\":\"...\"}]}\n]}\n\n录音内容：\n{text}">' +
+          '</textarea>' +
+          '<div style="font-size:0.75rem;color:var(--muted);margin-top:6px;">' +
+            '💡 sections 支持的 type：' +
+            '<code style="background:var(--surface);padding:1px 4px;border-radius:3px;">text</code> ' +
+            '<code style="background:var(--surface);padding:1px 4px;border-radius:3px;">list</code> ' +
+            '<code style="background:var(--surface);padding:1px 4px;border-radius:3px;">kv</code> ' +
+            '<code style="background:var(--surface);padding:1px 4px;border-radius:3px;">tags</code> ' +
+            '<code style="background:var(--surface);padding:1px 4px;border-radius:3px;">actions</code>' +
+          '</div>' +
+        '</div>' +
+
+      '</div>' +
+
+      '<div class="modal-footer">' +
+        '<button class="btn btn-ghost" onclick="closeCreateTypeModal()">取消</button>' +
+        '<button class="btn btn-primary" id="ct-submit-btn" onclick="submitCreateType()">创建类型</button>' +
+      '</div>' +
+    '</div>';
+
+  document.body.appendChild(modal);
+  requestAnimationFrame(function() { modal.classList.add('active'); });
+  setTimeout(function() {
+    var nameInput = document.getElementById('ct-name');
+    if (nameInput) nameInput.focus();
+  }, 150);
+}
+
+function closeCreateTypeModal() {
+  var m = document.getElementById('create-type-modal');
+  if (m) m.remove();
+}
+
+function submitCreateType() {
+  var name        = (document.getElementById('ct-name').value || '').trim();
+  var displayName = (document.getElementById('ct-display-name').value || '').trim();
+  var description = (document.getElementById('ct-description').value || '').trim();
+  var prompt      = (document.getElementById('ct-prompt').value || '').trim();
+
+  // 校验
+  if (!name) { showToast('请填写类型标识', 'error'); document.getElementById('ct-name').focus(); return; }
+  if (!/^[a-z][a-z0-9_]*$/.test(name)) { showToast('类型标识只能用小写字母、数字、下划线，且须以字母开头', 'error'); return; }
+  if (!displayName) { showToast('请填写显示名称', 'error'); document.getElementById('ct-display-name').focus(); return; }
+  if (!prompt) { showToast('请填写 Prompt 内容', 'error'); document.getElementById('ct-prompt').focus(); return; }
+  if (!prompt.includes('{text}')) { showToast('Prompt 必须包含 {text} 占位符', 'error'); return; }
+
+  var btn = document.getElementById('ct-submit-btn');
+  btn.disabled = true;
+  btn.textContent = '创建中…';
+
+  // Step 1: 先创建 PromptTemplate
+  apiRequest('/admin/prompts', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: name,
+      description: description || (displayName + ' — 自定义分析类型'),
+      content: prompt,
+      is_active: true
+    })
+  })
+  .then(function() {
+    // Step 2: 创建 TaskType，prompt_key 指向刚建的模板
+    return apiRequest('/admin/task-types', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: name,
+        display_name: displayName,
+        description: description || '',
+        prompt_key: name,
+        default_rank: 0,
+        sort_order: 100
+      })
+    });
+  })
+  .then(function(data) {
+    showToast('✅ 类型「' + displayName + '」创建成功', 'success');
+    closeCreateTypeModal();
+    loadInstalledTypes();
+  })
+  .catch(function(e) {
+    showToast('创建失败：' + e.message, 'error');
+    btn.disabled = false;
+    btn.textContent = '创建类型';
+  });
 }
 
 // ==================== 工具函数 ====================

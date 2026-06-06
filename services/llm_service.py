@@ -8,11 +8,102 @@ LLM 服务 - 大模型分析
 import json
 import asyncio
 import httpx
+import time
 from typing import Optional
 from pathlib import Path
 import logging
 
 from config import llm_settings
+
+# ── obs 可观测性（本地 obs/ 模块）─────────────────────────────────
+try:
+    from obs.db import write_call as _obs_write
+    from obs.pricing import calc_cost as _obs_calc_cost
+    from obs.patch import get_trace_id as _obs_get_trace_id, set_session as _obs_set_session
+    try:
+        from obs.patch import _session_var as _obs_session_var
+        def _obs_get_session() -> str:
+            return _obs_session_var.get()
+    except Exception:
+        def _obs_get_session() -> str:
+            return ""
+    _OBS_ENABLED = True
+except Exception:
+    _OBS_ENABLED = False
+    _obs_get_trace_id = lambda: None
+    _obs_get_session = lambda: ""
+
+
+import re as _re
+
+
+def _sanitize_error(msg: str) -> str:
+    """脱敏 error_msg：屏蔽 API key 特征，截断超长内容"""
+    if not msg:
+        return msg
+    msg = _re.sub(r'(sk-[A-Za-z0-9]{8,})', '[REDACTED_KEY]', msg)
+    msg = _re.sub(r'(Bearer\s+[A-Za-z0-9\-_\.]{8,})', 'Bearer [REDACTED]', msg)
+    msg = _re.sub(r'([Aa][Pp][Ii][_-]?[Kk][Ee][Yy]\s*[=:]\s*\S+)', 'api_key=[REDACTED]', msg)
+    if len(msg) > 500:
+        msg = msg[:500] + '...[truncated]'
+    return msg
+
+
+def _classify_error(error_msg: str) -> Optional[str]:
+    """根据 error_msg 自动分类 error_type"""
+    if not error_msg:
+        return None
+    msg = error_msg.lower()
+    if 'timeout' in msg or 'timed out' in msg or 'read timeout' in msg:
+        return 'timeout'
+    if 'rate limit' in msg or '429' in msg or 'too many requests' in msg:
+        return 'rate_limit'
+    if '401' in msg or 'unauthorized' in msg or 'invalid api key' in msg or 'authentication' in msg:
+        return 'auth'
+    if 'connection' in msg or 'network' in msg or 'refused' in msg or 'unreachable' in msg:
+        return 'network'
+    if 'json' in msg or 'parse' in msg or 'decode' in msg or 'invalid response' in msg:
+        return 'parse_error'
+    return 'unknown'
+
+
+def _obs_provider(url: str) -> str:
+    u = url.lower()
+    if "moonshot" in u: return "moonshot"
+    if "dashscope" in u or "aliyun" in u: return "qwen"
+    if "minimax" in u: return "minimax"
+    if "volces" in u: return "doubao"
+    if "bigmodel" in u or "zhipu" in u: return "zhipu"
+    return "unknown"
+
+
+def _obs_record(url, model, usage, latency_ms, status, operation="analyze", error_msg=None, prompt_chars=None):
+    if not _OBS_ENABLED:
+        return
+    try:
+        in_tok  = usage.get("prompt_tokens")
+        out_tok = usage.get("completion_tokens")
+        cost = _obs_calc_cost(model, in_tok, out_tok) if in_tok is not None and out_tok is not None else None
+        error_type = _classify_error(error_msg) if error_msg else None
+        sanitized_error = _sanitize_error(error_msg) if error_msg else None
+        _obs_write(
+            project="echomind",
+            operation=operation,
+            provider=_obs_provider(url),
+            model=model,
+            input_tokens=in_tok,
+            output_tokens=out_tok,
+            latency_ms=latency_ms,
+            cost_cny=cost,
+            status=status,
+            error_msg=sanitized_error,
+            error_type=error_type,
+            trace_id=_obs_get_trace_id() or None,
+            session_id=_obs_get_session() or None,
+            prompt_chars=prompt_chars,
+        )
+    except Exception:
+        pass
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +173,7 @@ class LLMService:
 
         return self._prompt_cache.get(report_type, self._prompt_cache.get("meeting_analysis", self._default_meeting_prompt()))
 
-    async def analyze(self, text: str, mode: str = "meeting", report_type: str = None, db=None, context_data: str = "") -> dict:
+    async def analyze(self, text: str, mode: str = "meeting", report_type: str = None, db=None, context_data: str = "", obs_operation: str = None) -> dict:
         """
         分析文字内容
         :param text: 待分析的文本
@@ -94,6 +185,8 @@ class LLMService:
         if report_type is None:
             report_type = "meeting_analysis"
 
+        _op = obs_operation or report_type
+
         try:
             prompt_template = self._get_prompt(report_type, db)
             prompt = prompt_template.replace("{text}", text)
@@ -102,15 +195,15 @@ class LLMService:
                 prompt = prompt.replace("{context_data}", ctx)
 
             if self.provider == "minimax":
-                return await self._call_minimax(prompt)
+                return await self._call_minimax(prompt, operation=_op)
             elif self.provider == "kimi":
-                return await self._call_kimi(prompt)
+                return await self._call_kimi(prompt, operation=_op)
             elif self.provider == "qwen":
-                return await self._call_qwen(prompt)
+                return await self._call_qwen(prompt, operation=_op)
             elif self.provider == "doubao":
-                return await self._call_doubao(prompt)
+                return await self._call_doubao(prompt, operation=_op)
             elif self.provider == "zhipu":
-                return await self._call_zhipu(prompt)
+                return await self._call_zhipu(prompt, operation=_op)
             elif self.provider == "mock":
                 return await self._mock_analyze(prompt)
             else:
@@ -131,16 +224,17 @@ class LLMService:
             data_str = _json.dumps(data, ensure_ascii=False, indent=2)
             prompt = prompt_template.replace("{data}", data_str)
 
+            op = f"gen:{prompt_type}"
             if self.provider == "minimax":
-                return await self._call_minimax(prompt)
+                return await self._call_minimax(prompt, operation=op)
             elif self.provider == "kimi":
-                return await self._call_kimi(prompt)
+                return await self._call_kimi(prompt, operation=op)
             elif self.provider == "qwen":
-                return await self._call_qwen(prompt)
+                return await self._call_qwen(prompt, operation=op)
             elif self.provider == "doubao":
-                return await self._call_doubao(prompt)
+                return await self._call_doubao(prompt, operation=op)
             elif self.provider == "zhipu":
-                return await self._call_zhipu(prompt)
+                return await self._call_zhipu(prompt, operation=op)
             else:
                 # mock：返回简单占位文本
                 return {"success": True, "data": {
@@ -153,7 +247,7 @@ class LLMService:
             logger.error(f"叙事化生成异常({prompt_type}): {e}")
             return {"success": False, "data": None, "error": str(e)}
 
-    async def _post_openai_compat(self, url: str, api_key: str, model: str, prompt: str, timeout: int = 120) -> dict:
+    async def _post_openai_compat(self, url: str, api_key: str, model: str, prompt: str, timeout: int = 120, operation: str = "analyze") -> dict:
         """通用 OpenAI 兼容接口调用"""
         headers = {
             "Authorization": f"Bearer {api_key}",
@@ -164,13 +258,16 @@ class LLMService:
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.7
         }
+        _t0 = time.monotonic()
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(url, json=data, headers=headers)
+            _latency = int((time.monotonic() - _t0) * 1000)
             if resp.status_code == 200:
                 result = resp.json()
                 choices = result.get("choices")
                 if choices:
                     content = choices[0]["message"]["content"]
+                    _obs_record(url, model, result.get("usage") or {}, _latency, "ok", operation=operation, prompt_chars=len(prompt))
                     return {"success": True, "data": self._parse_analysis(content)}
                 else:
                     err = (result.get("base_resp", {}).get("status_msg")
@@ -178,72 +275,74 @@ class LLMService:
                            or result.get("message")
                            or "API返回空响应")
                     logger.error(f"API格式错误: {result}")
+                    _obs_record(url, model, {}, _latency, "error", operation=operation, error_msg=err, prompt_chars=len(prompt))
                     return {"success": False, "data": None, "error": err}
             else:
                 logger.error(f"API错误 [{resp.status_code}]: {resp.text}")
+                _obs_record(url, model, {}, _latency, "error", operation=operation, error_msg=f"HTTP {resp.status_code}", prompt_chars=len(prompt))
                 return {"success": False, "data": None, "error": f"API错误: {resp.status_code}"}
 
     # ==================== MiniMax ====================
 
-    async def _call_minimax(self, prompt: str) -> dict:
+    async def _call_minimax(self, prompt: str, operation: str = "analyze") -> dict:
         api_key = llm_settings.MINIMAX_API_KEY
         if not api_key:
             return await self._mock_analyze(prompt)
         url = f"{llm_settings.MINIMAX_BASE_URL}/text/chatcompletion_v2"
         try:
-            return await self._post_openai_compat(url, api_key, llm_settings.MINIMAX_MODEL, prompt)
+            return await self._post_openai_compat(url, api_key, llm_settings.MINIMAX_MODEL, prompt, operation=operation)
         except Exception as e:
             logger.error(f"MiniMax请求异常: {e}")
             return {"success": False, "data": None, "error": str(e)}
 
     # ==================== Kimi ====================
 
-    async def _call_kimi(self, prompt: str) -> dict:
+    async def _call_kimi(self, prompt: str, operation: str = "analyze") -> dict:
         api_key = llm_settings.KIMI_API_KEY
         if not api_key:
             return await self._mock_analyze(prompt)
         url = f"{llm_settings.KIMI_BASE_URL}/chat/completions"
         try:
-            return await self._post_openai_compat(url, api_key, llm_settings.KIMI_MODEL, prompt)
+            return await self._post_openai_compat(url, api_key, llm_settings.KIMI_MODEL, prompt, operation=operation)
         except Exception as e:
             logger.error(f"Kimi请求异常: {e}")
             return {"success": False, "data": None, "error": str(e)}
 
     # ==================== 通义千问 ====================
 
-    async def _call_qwen(self, prompt: str) -> dict:
+    async def _call_qwen(self, prompt: str, operation: str = "analyze") -> dict:
         api_key = llm_settings.QWEN_API_KEY
         if not api_key:
             return await self._mock_analyze(prompt)
         url = f"{llm_settings.QWEN_BASE_URL}/chat/completions"
         try:
-            return await self._post_openai_compat(url, api_key, llm_settings.QWEN_MODEL, prompt)
+            return await self._post_openai_compat(url, api_key, llm_settings.QWEN_MODEL, prompt, operation=operation)
         except Exception as e:
             logger.error(f"通义千问请求异常: {e}")
             return {"success": False, "data": None, "error": str(e)}
 
     # ==================== 豆包 ====================
 
-    async def _call_doubao(self, prompt: str) -> dict:
+    async def _call_doubao(self, prompt: str, operation: str = "analyze") -> dict:
         api_key = llm_settings.DOUBAO_API_KEY
         if not api_key:
             return await self._mock_analyze(prompt)
         url = f"{llm_settings.DOUBAO_BASE_URL}/chat/completions"
         try:
-            return await self._post_openai_compat(url, api_key, llm_settings.DOUBAO_MODEL, prompt)
+            return await self._post_openai_compat(url, api_key, llm_settings.DOUBAO_MODEL, prompt, operation=operation)
         except Exception as e:
             logger.error(f"豆包请求异常: {e}")
             return {"success": False, "data": None, "error": str(e)}
 
     # ==================== 智谱 GLM ====================
 
-    async def _call_zhipu(self, prompt: str) -> dict:
+    async def _call_zhipu(self, prompt: str, operation: str = "analyze") -> dict:
         api_key = llm_settings.ZHIPU_API_KEY
         if not api_key:
             return await self._mock_analyze(prompt)
         url = f"{llm_settings.ZHIPU_BASE_URL}/chat/completions"
         try:
-            return await self._post_openai_compat(url, api_key, llm_settings.ZHIPU_MODEL, prompt)
+            return await self._post_openai_compat(url, api_key, llm_settings.ZHIPU_MODEL, prompt, operation=operation)
         except Exception as e:
             logger.error(f"智谱GLM请求异常: {e}")
             return {"success": False, "data": None, "error": str(e)}
@@ -299,15 +398,15 @@ class LLMService:
         prompt = self._build_extract_prompt(supplement_text, report_type, current_data)
         try:
             if self.provider == "minimax":
-                result = await self._call_minimax(prompt)
+                result = await self._call_minimax(prompt, operation="extract")
             elif self.provider == "kimi":
-                result = await self._call_kimi(prompt)
+                result = await self._call_kimi(prompt, operation="extract")
             elif self.provider == "qwen":
-                result = await self._call_qwen(prompt)
+                result = await self._call_qwen(prompt, operation="extract")
             elif self.provider == "doubao":
-                result = await self._call_doubao(prompt)
+                result = await self._call_doubao(prompt, operation="extract")
             elif self.provider == "zhipu":
-                result = await self._call_zhipu(prompt)
+                result = await self._call_zhipu(prompt, operation="extract")
             elif self.provider == "mock":
                 result = self._mock_extract(report_type)
             else:

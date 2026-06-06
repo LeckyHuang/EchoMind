@@ -6,12 +6,14 @@ EchoMind 智能录音分析平台
 """
 
 import os
+import time
 import uuid
 import asyncio
 import logging
+from collections import defaultdict
 from pathlib import Path
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends
+from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -32,6 +34,29 @@ from routers.settings_router import router as settings_router
 from routers.report_router import router as report_router
 from routers.tasktype_router import router as tasktype_router
 
+# 简单内存速率限制（per-IP，单进程有效）
+_upload_counters: dict = defaultdict(list)
+_RATE_LIMIT = 20
+_RATE_WINDOW = 3600
+
+def _check_rate_limit(client_ip: str) -> bool:
+    now = time.time()
+    ts_list = _upload_counters[client_ip]
+    _upload_counters[client_ip] = [t for t in ts_list if t > now - _RATE_WINDOW]
+    if len(_upload_counters[client_ip]) >= _RATE_LIMIT:
+        return False
+    _upload_counters[client_ip].append(now)
+    return True
+
+# obs 可观测性（可选，obs/ 目录不存在时静默跳过）
+try:
+    import obs as _obs
+    from obs.router import router as obs_router
+    _obs.init("echomind")
+    _OBS_ROUTER = obs_router
+except Exception:
+    _OBS_ROUTER = None
+
 # 配置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -46,7 +71,7 @@ app = FastAPI(
 # 允许跨域
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.CORS_ORIGINS,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -60,6 +85,8 @@ app.include_router(user_router)
 app.include_router(settings_router)
 app.include_router(report_router)
 app.include_router(tasktype_router)
+if _OBS_ROUTER:
+    app.include_router(_OBS_ROUTER)
 
 # 管理后台入口：访问 /app/echodmind 自动跳转到登录页
 @app.get("/app/echodmind")
@@ -189,6 +216,7 @@ async def health_check():
 
 @app.post("/api/v1/analyze", response_model=AnalyzeResponse)
 async def analyze_audio(
+    request: Request,
     file: UploadFile = File(...),
     task_types: str = Form(None),           # 逗号分隔的类型名，为空则用默认类型
     supplementary_text: str = Form(None),   # 可选补充说明，写入所有报告
@@ -201,8 +229,38 @@ async def analyze_audio(
     from models import SessionLocal, UploadStatus, AnalysisStatus
     from routers.report_router import auto_generate_share
 
+    client_ip = request.client.host if request.client else "unknown"
+    if not _check_rate_limit(client_ip):
+        try:
+            from obs.db import write_span as _sec_write_span
+            import uuid as _sec_uuid
+            _sec_now = time.time()
+            _sec_write_span(
+                span_id=_sec_uuid.uuid4().hex,
+                trace_id=_sec_uuid.uuid4().hex[:12],
+                service="echomind",
+                operation="security:rate_limit_hit",
+                start_ts=_sec_now, end_ts=_sec_now,
+                status="blocked",
+                metadata={"client_ip": client_ip},
+            )
+        except Exception:
+            pass
+        raise HTTPException(status_code=429, detail="上传过于频繁，请稍后再试")
+
     file_id = None
     db = SessionLocal()
+    duration = None
+    _e2e_start = time.time()
+    _e2e_status = "ok"
+
+    # 生成本次请求的 trace_id，让 ASR span 和 LLM 调用归入同一链路；同时写入 user_id
+    _obs_mod = None
+    if _OBS_ROUTER is not None:
+        import obs as _obs_mod
+        import uuid as _uuid
+        _obs_mod.set_trace_id(_uuid.uuid4().hex[:12])
+        _obs_mod.set_session(str(current_user.id))
 
     try:
         # 1. 保存文件
@@ -225,7 +283,7 @@ async def analyze_audio(
         db.refresh(audio_file)
 
         # 2. ASR 转文字
-        asr_result = await asr_service.transcribe(file_path)
+        asr_result = await asr_service.transcribe(file_path, audio_duration_s=duration)
         asr_text = asr_result["text"] if asr_result["success"] else ""
         audio_file.asr_text = asr_text
         db.commit()
@@ -243,7 +301,7 @@ async def analyze_audio(
         selected = [t.strip() for t in task_types.split(",")] if task_types else None
         active_types = _get_task_types(db, selected) or _get_task_types(db, None)
         tasks = [
-            llm_service.analyze(text=asr_text, report_type=rt, db=db)
+            llm_service.analyze(text=asr_text, report_type=rt, db=db, obs_operation=f"app:{rt}")
             for rt in active_types
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -301,6 +359,7 @@ async def analyze_audio(
         )
 
     except Exception as e:
+        _e2e_status = "error"
         logger.error(f"分析流程异常: {str(e)}")
         if file_id:
             try:
@@ -312,6 +371,21 @@ async def analyze_audio(
                 logger.error(f"更新文件状态失败: {ex}")
         return AnalyzeResponse(success=False, file_id=file_id or "", error=str(e))
     finally:
+        if _obs_mod is not None:
+            try:
+                from obs.db import write_span as _obs_write_span
+                _obs_write_span(
+                    span_id=uuid.uuid4().hex,
+                    trace_id=_obs_mod.get_trace_id(),
+                    service="echomind",
+                    operation="request",
+                    start_ts=_e2e_start,
+                    end_ts=time.time(),
+                    status=_e2e_status,
+                    metadata={"audio_duration_s": duration},
+                )
+            except Exception:
+                pass
         db.close()
 
 
@@ -447,52 +521,50 @@ def _seed_prompt_templates():
 
 def _seed_task_types():
     """
-    首次启动时将三个内置展厅类型写入 analysis_task_types 表（default_rank 1/2/3）。
-    已有记录不覆盖；预设库中的其他类型由用户在管理后台按需安装。
+    首次启动时写入两个普适默认类型：会议摘要（rank 1）+ 意图分析（rank 2）。
+    prompt 内容从预设库读取，同步写入 prompt_templates 表。
+    已有记录不覆盖；展厅系列和其他类型由用户在管理后台「类型库」按需安装。
     """
-    from models import SessionLocal, AnalysisTaskType
+    from models import SessionLocal, AnalysisTaskType, PromptTemplate
+    from presets_library import get_preset, get_preset_prompt
 
     BUILTIN_TYPES = [
-        {
-            "name": "customer_brief",
-            "display_name": "参观简报",
-            "description": "接待录音 → 参观简报（官方报道风格）",
-            "prompt_key": "customer_brief",
-            "share_prompt_key": "customer_brief_share",
-            "is_default": True,
-            "default_rank": 1,
-            "sort_order": 1,
-        },
-        {
-            "name": "business_opportunity",
-            "display_name": "商机简报",
-            "description": "接待录音 → 商机简报（发给客户经理）",
-            "prompt_key": "business_opportunity",
-            "share_prompt_key": "business_opportunity_share",
-            "is_default": True,
-            "default_rank": 2,
-            "sort_order": 2,
-        },
-        {
-            "name": "reception_review",
-            "display_name": "接待复盘",
-            "description": "接待录音 → 接待复盘（运营团队参考）",
-            "prompt_key": "reception_review",
-            "share_prompt_key": "reception_review_share",
-            "is_default": True,
-            "default_rank": 3,
-            "sort_order": 3,
-        },
+        {"name": "meeting_summary",  "display_name": "会议摘要", "default_rank": 1, "sort_order": 1},
+        {"name": "intent_analysis",  "display_name": "意图分析", "default_rank": 2, "sort_order": 2},
     ]
 
     db = SessionLocal()
     try:
         for td in BUILTIN_TYPES:
-            exists = db.query(AnalysisTaskType).filter(AnalysisTaskType.name == td["name"]).first()
-            if exists:
-                continue
-            db.add(AnalysisTaskType(**td))
-            logger.info(f"TaskType seed 写入: {td['name']}")
+            name = td["name"]
+            # 1. 写入 PromptTemplate（若已存在则跳过）
+            if not db.query(PromptTemplate).filter(PromptTemplate.name == name).first():
+                preset = get_preset(name)
+                prompt_content = get_preset_prompt(name)
+                if preset and prompt_content:
+                    db.add(PromptTemplate(
+                        name=name,
+                        description=f"[{td['display_name']}] {preset.get('description', '')}",
+                        content=prompt_content,
+                        is_active=True,
+                    ))
+                    logger.info(f"Prompt seed 写入: {name}")
+
+            # 2. 写入 AnalysisTaskType（若已存在则跳过）
+            if not db.query(AnalysisTaskType).filter(AnalysisTaskType.name == name).first():
+                preset = get_preset(name)
+                db.add(AnalysisTaskType(
+                    name=name,
+                    display_name=td["display_name"],
+                    description=preset.get("description", "") if preset else "",
+                    prompt_key=name,
+                    share_prompt_key=None,
+                    is_default=True,
+                    default_rank=td["default_rank"],
+                    sort_order=td["sort_order"],
+                ))
+                logger.info(f"TaskType seed 写入: {name}")
+
         db.commit()
     except Exception as e:
         logger.error(f"TaskType seed 失败: {e}")

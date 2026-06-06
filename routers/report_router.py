@@ -556,7 +556,7 @@ def _get_report_label(report_type: str, db=None) -> str:
             pass
     return REPORT_TYPE_LABELS.get(report_type, report_type)
 
-ACCENT = "#C45D3E"
+ACCENT = "#00CDB8"
 
 
 def _html_wrapper(label: str, title: str, body: str, share_id: str = None) -> str:
@@ -600,14 +600,14 @@ def _html_wrapper(label: str, title: str, body: str, share_id: str = None) -> st
   var actionBtn = document.createElement('button');
   actionBtn.id = 'share-action-btn';
   actionBtn.textContent = '修改';
-  actionBtn.style.cssText = 'background:#C45D3E;color:#fff;border:none;padding:8px 20px;border-radius:16px;font-size:13px;font-weight:600;cursor:pointer;margin-top:12px;';
+  actionBtn.style.cssText = 'background:#00CDB8;color:#0D1B2E;border:none;padding:8px 20px;border-radius:16px;font-size:13px;font-weight:600;cursor:pointer;margin-top:12px;';
 
   actionBtn.addEventListener('click', function(){{
     if(!isEditing){{
       isEditing = true;
       editableEls.forEach(function(el){{
         el.contentEditable = true;
-        el.style.boxShadow = 'inset 0 0 0 1px #C45D3E';
+        el.style.boxShadow = 'inset 0 0 0 1px #00CDB8';
         el.style.borderRadius = '4px';
         el.style.padding = '2px 4px';
       }});
@@ -632,7 +632,7 @@ def _html_wrapper(label: str, title: str, body: str, share_id: str = None) -> st
               el.style.padding = '';
             }});
             actionBtn.textContent = '修改';
-            actionBtn.style.background = '#C45D3E';
+            actionBtn.style.background = '#00CDB8';
             actionBtn.disabled = false;
           }} else {{
             alert('保存失败：' + (data.detail || '未知错误'));
@@ -667,38 +667,38 @@ def _html_wrapper(label: str, title: str, body: str, share_id: str = None) -> st
 <title>{title}</title>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
-body{{font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;background:#f8f7f4;color:#1a1a1a;font-size:15px;line-height:1.7;-webkit-font-smoothing:antialiased}}
-.header{{background:{ACCENT};padding:24px 20px 20px;color:#fff}}
-.header-label{{font-size:11px;opacity:.75;letter-spacing:2px;margin-bottom:8px;text-transform:uppercase}}
-.header-title{{font-size:21px;font-weight:700;line-height:1.35}}
+body{{font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;background:#0D1B2E;color:#D0E8FF;font-size:15px;line-height:1.7;-webkit-font-smoothing:antialiased}}
+.header{{background:linear-gradient(135deg,#0D2744 0%,#0D1B2E 100%);padding:28px 20px 22px;border-bottom:2px solid {ACCENT}}}
+.header-label{{font-size:11px;color:{ACCENT};letter-spacing:2.5px;margin-bottom:10px;text-transform:uppercase;opacity:.9}}
+.header-title{{font-size:22px;font-weight:700;line-height:1.35;color:#E8F4FF}}
 .body{{padding:0 0 48px}}
 .cover-photo{{width:100%;display:block;max-height:260px;object-fit:cover;border-radius:8px}}
-.section{{background:#fff;margin:12px 0;padding:18px 20px}}
-.section-title{{font-size:12px;font-weight:700;color:{ACCENT};letter-spacing:1.5px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid #f0ece6;text-transform:uppercase}}
-.para{{font-size:15px;line-height:1.85;color:#1a1a1a;margin-bottom:10px}}
+.section{{background:#132236;margin:10px 0;padding:18px 20px;border-left:3px solid transparent}}
+.section-title{{font-size:11px;font-weight:700;color:{ACCENT};letter-spacing:2px;margin-bottom:14px;padding-bottom:8px;border-bottom:1px solid #1E3550;text-transform:uppercase}}
+.para{{font-size:15px;line-height:1.9;color:#C8DFF5;margin-bottom:10px}}
 .para:last-child{{margin-bottom:0}}
-.item{{padding:7px 0;border-bottom:1px solid #f5f3ef;font-size:14px;line-height:1.7}}
+.item{{padding:8px 0;border-bottom:1px solid #1A3050;font-size:14px;line-height:1.7;color:#B8D4EE}}
 .item:last-child{{border-bottom:none}}
-.item-label{{font-size:11px;color:#aaa;margin-bottom:3px;letter-spacing:.5px}}
-.tag{{display:inline-block;background:#f0ece6;color:{ACCENT};font-size:12px;padding:4px 12px;border-radius:20px;margin:3px 4px 3px 0}}
-.tag-green{{background:#eef7f0;color:#4a7c59}}
+.item-label{{font-size:11px;color:#5A7A9A;margin-bottom:3px;letter-spacing:.5px}}
+.tag{{display:inline-block;background:#0D2744;color:{ACCENT};font-size:12px;padding:4px 12px;border-radius:20px;margin:3px 4px 3px 0;border:1px solid #1A3A5C}}
+.tag-green{{background:#0D2A1E;color:#3DD68C;border-color:#1A4A32}}
 .badge-pri{{display:inline-block;font-size:11px;padding:2px 8px;border-radius:4px;margin-right:6px;font-weight:600}}
-.pri-high{{background:#fef0ee;color:#d64545}}
-.pri-mid{{background:#fef9ed;color:#c9a227}}
-.pri-low{{background:#f0f0f0;color:#888}}
-.supp{{background:#fffdf8;border-left:3px solid {ACCENT};padding:14px 16px;font-size:14px;line-height:1.85;white-space:pre-wrap;color:#444}}
+.pri-high{{background:#2D1620;color:#FF6B6B}}
+.pri-mid{{background:#2D2410;color:#FFD166}}
+.pri-low{{background:#1A2A3A;color:#7A93B0}}
+.supp{{background:#0D2236;border-left:3px solid {ACCENT};padding:14px 16px;font-size:14px;line-height:1.85;white-space:pre-wrap;color:#A0C0E0}}
 .photos-grid{{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px;align-items:start}}
-.footer{{text-align:center;font-size:12px;color:#ccc;padding:24px 20px;background:#f8f7f4}}
+.footer{{text-align:center;font-size:12px;color:#3A5A7A;padding:24px 20px;background:#0D1B2E}}
 ul{{padding-left:18px}}
-li{{margin-bottom:6px;font-size:14px;line-height:1.7}}
-.outlook{{background:#fffdf8;border-radius:8px;padding:16px 18px;margin:12px 20px;font-size:14px;line-height:1.85;color:#555;font-style:italic;border-left:3px solid {ACCENT};}}
-.leads-section{{background:#fff8f5}}
-.lead-item{{padding:9px 0;border-bottom:1px solid #f5ede8;font-size:14px;font-weight:500;color:#1a1a1a;line-height:1.6}}
+li{{margin-bottom:6px;font-size:14px;line-height:1.7;color:#B8D4EE}}
+.outlook{{background:#0D2236;border-radius:8px;padding:16px 18px;margin:10px 20px;font-size:14px;line-height:1.85;color:#90B8D8;font-style:italic;border-left:3px solid {ACCENT}}}
+.leads-section{{background:#12213A}}
+.lead-item{{padding:9px 0;border-bottom:1px solid #1A3050;font-size:14px;font-weight:500;color:#C0D8F0;line-height:1.6}}
 .lead-item:last-child{{border-bottom:none}}
-.highlight-section{{background:#f5fbf7}}
-.highlight-item{{color:#2d5a3d}}
-.improve-section{{background:#fffaf5}}
-.improve-item{{color:#7a4a1a}}
+.highlight-section{{background:#0D2A1E}}
+.highlight-item{{color:#3DD68C}}
+.improve-section{{background:#2A1A10}}
+.improve-item{{color:#FFB347}}
 </style>
 </head>
 <body>

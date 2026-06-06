@@ -21,6 +21,11 @@ from config import asr_settings
 
 logger = logging.getLogger(__name__)
 
+try:
+    import obs as _obs
+except ImportError:
+    _obs = None
+
 
 class ASRService:
     """ASR 服务统一接口"""
@@ -29,15 +34,30 @@ class ASRService:
         self.provider = asr_settings.PROVIDER
         logger.info(f"ASR服务初始化，提供商: {self.provider}")
 
-    async def transcribe(self, file_path: str) -> dict:
+    async def transcribe(self, file_path: str, audio_duration_s: float = 0.0) -> dict:
         """
         语音转文字
         :param file_path: 音频文件路径
+        :param audio_duration_s: 音频时长（秒），用于 ASR 成本计算
         :return: {"success": bool, "text": str, "error": str}
         """
         if not Path(file_path).exists():
             return {"success": False, "text": "", "error": "文件不存在"}
 
+        if _obs:
+            if audio_duration_s > 0:
+                span_kwargs = {
+                    "audio_duration_s": audio_duration_s,
+                    "audio_size_bytes": Path(file_path).stat().st_size,
+                }
+                with _obs.span("asr", provider=self.provider, **span_kwargs):
+                    return await self._do_transcribe(file_path)
+            else:
+                with _obs.span("asr", provider=self.provider):
+                    return await self._do_transcribe(file_path)
+        return await self._do_transcribe(file_path)
+
+    async def _do_transcribe(self, file_path: str) -> dict:
         try:
             if self.provider == "qwen":
                 return await self._transcribe_qwen(file_path)
@@ -88,7 +108,7 @@ class ASRService:
         headers = {"Authorization": f"Bearer {api_key}"}
 
         try:
-            async with httpx.AsyncClient(timeout=120) as client:
+            async with httpx.AsyncClient(timeout=120, trust_env=False) as client:
                 with open(file_path, "rb") as f:
                     files = {"file": (Path(file_path).name, f)}
                     data = {"model": "asr-01"}
@@ -213,7 +233,8 @@ class ASRService:
         }
 
         try:
-            async with httpx.AsyncClient(timeout=300) as client:
+            # trust_env=False：禁止继承系统代理（SOCKS/HTTP），豆包是国内服务直连即可
+            async with httpx.AsyncClient(timeout=300, trust_env=False) as client:
                 # 1. 提交任务（大文件 base64 上传需要更长超时）
                 resp = await client.post(submit_url, json=payload, headers=headers)
                 status_code = resp.headers.get("X-Api-Status-Code", "")
@@ -293,7 +314,7 @@ class ASRService:
         }
 
         try:
-            async with httpx.AsyncClient(timeout=60) as client:
+            async with httpx.AsyncClient(timeout=60, trust_env=False) as client:
                 resp = await client.post(url, content=audio_data, headers=headers)
                 if resp.status_code == 200:
                     result = resp.json()
@@ -324,7 +345,7 @@ class ASRService:
             return await self._mock_transcribe(file_path)
 
         try:
-            async with httpx.AsyncClient(timeout=60) as client:
+            async with httpx.AsyncClient(timeout=60, trust_env=False) as client:
                 # 获取 token
                 token_url = "https://aip.baidubce.com/oauth/2.0/token"
                 params = {"grant_type": "client_credentials", "client_id": api_key, "client_secret": secret_key}
