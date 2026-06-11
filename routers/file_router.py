@@ -10,7 +10,7 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -256,7 +256,7 @@ async def download_file(
     
     file_path = Path(settings.UPLOAD_DIR) / audio_file.stored_filename
     if not file_path.exists():
-        raise HTTPException(status_code=404, detail="文件不存在")
+        raise HTTPException(status_code=404, detail="录音物理文件已过期清理（分析报告仍保留）")
     
     # 原始文件名
     download_name = audio_file.original_filename or f"{file_id}.{audio_file.file_format}"
@@ -340,7 +340,7 @@ async def get_file_detail(
 @router.post("/files/upload-analyze")
 async def admin_upload_analyze(
     file: UploadFile = File(...),
-    task_types: str = None,  # 逗号分隔，为空则取默认类型
+    task_types: str = Form(None),  # 逗号分隔，为空则取默认类型；前端放 FormData 发送，必须声明为 Form
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
