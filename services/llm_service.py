@@ -259,7 +259,8 @@ class LLMService:
             "temperature": 0.7
         }
         _t0 = time.monotonic()
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        # trust_env=False：禁止继承系统代理，LLM 服务商均为国内直连
+        async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
             resp = await client.post(url, json=data, headers=headers)
             _latency = int((time.monotonic() - _t0) * 1000)
             if resp.status_code == 200:
