@@ -18,7 +18,7 @@ async function initSettings() {
             <label class="form-label" for="cleanup-expire-hours">文件过期时间（小时）</label>
             <div style="display: flex; gap: 12px; align-items: center;">
               <input type="number" id="cleanup-expire-hours" class="form-input" style="max-width: 160px;" min="1" placeholder="例如: 168">
-              <span style="color: var(--muted); font-size: 0.85rem;">超过此时间的录音文件将被自动清理</span>
+              <span style="color: var(--muted); font-size: 0.85rem;">超过此时间的录音物理文件将被自动清理（分析报告与记录永久保留）</span>
             </div>
           </div>
           

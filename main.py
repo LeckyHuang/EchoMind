@@ -432,8 +432,14 @@ async def startup_event():
     _run_db_migrations()
     _seed_prompt_templates()
     _seed_task_types()
-    await cleanup_old_files()
-    from scheduler import start_scheduler, stop_scheduler
+    # 启动时只清理过期录音物理文件，阈值与管理后台"清理设置"一致
+    from models import SessionLocal
+    from scheduler import start_scheduler, get_cleanup_expire_hours
+    _db = SessionLocal()
+    try:
+        await cleanup_old_files(get_cleanup_expire_hours(_db))
+    finally:
+        _db.close()
     start_scheduler()
     logger.info("EchoMind 智能录音分析平台 v1.0 启动完成")
 

@@ -34,8 +34,9 @@ async def get_settings(
     """
     获取系统设置
     """
-    cleanup_expire_hours = SystemSetting.get_setting(db, "cleanup_expire_hours", "168")
-    cleanup_cron = SystemSetting.get_setting(db, "cleanup_cron", "0 2 * * *")
+    # 默认值与清理任务（scheduler.get_cleanup_expire_hours / init_scheduler）保持一致
+    cleanup_expire_hours = SystemSetting.get_setting(db, "cleanup_expire_hours", str(settings.FILE_EXPIRE_HOURS))
+    cleanup_cron = SystemSetting.get_setting(db, "cleanup_cron", "0 3 * * *")
     active_prompt_id = SystemSetting.get_setting(db, "active_prompt_id", None)
 
     # 获取当前激活的 prompt 模板
@@ -67,7 +68,7 @@ async def update_settings(
             raise HTTPException(status_code=400, detail="过期时间必须大于0")
         SystemSetting.set_setting(
             db, "cleanup_expire_hours", str(request.cleanup_expire_hours),
-            "文件过期时间（小时）"
+            "录音物理文件过期时间（小时），报告与记录永久保留"
         )
 
     if request.cleanup_cron is not None:

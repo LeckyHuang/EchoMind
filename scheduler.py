@@ -8,7 +8,7 @@
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -23,6 +23,11 @@ logger = logging.getLogger(__name__)
 
 # 全局调度器实例
 scheduler = AsyncIOScheduler()
+
+
+def get_cleanup_expire_hours(db: Session) -> int:
+    """过期时长统一读管理后台设置的 cleanup_expire_hours，未配置时回退 .env 的 FILE_EXPIRE_HOURS"""
+    return int(SystemSetting.get_setting(db, "cleanup_expire_hours", str(settings.FILE_EXPIRE_HOURS)))
 
 
 def init_scheduler():
@@ -77,63 +82,52 @@ def init_scheduler():
 
 async def scheduled_cleanup():
     """
-    定时清理任务：清理数据库和物理文件中的过期记录
+    定时清理任务：只删除过期录音的物理文件。
+    DB 记录与分析报告永久保留（报告级联挂在 audio_files 上，禁止删除记录）。
     """
     logger.info(f"🕐 定时清理任务开始执行 | 时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    
+
     db = SessionLocal()
     cleaned_physical = 0
-    cleaned_db_records = 0
     errors = []
-    
+
     try:
-        # 1. 清理物理文件（已实现）
-        await cleanup_old_files()
-        
-        # 2. 清理数据库中的孤立/过期记录
-        from datetime import timedelta
-        from models import AudioFile, UploadStatus
-        
-        expire_hours = int(SystemSetting.get_setting(db, "file_expire_hours", "168"))
-        expire_time = datetime.now() - timedelta(hours=expire_hours)
-        
-        # 查找超过7天的已完成文件（即使分析完成了也清理）
+        expire_hours = get_cleanup_expire_hours(db)
+        # created_at 由 func.now() 写入（SQLite 下为 UTC），比较时同样用 UTC
+        expire_time = datetime.utcnow() - timedelta(hours=expire_hours)
+
         old_files = db.query(AudioFile).filter(
             AudioFile.created_at <= expire_time
         ).all()
-        
+
         for audio_file in old_files:
             try:
-                # 删除物理文件
+                if not audio_file.stored_filename:
+                    continue
                 file_path = Path(settings.UPLOAD_DIR) / audio_file.stored_filename
-                if file_path.exists():
+                if file_path.is_file():
                     file_path.unlink()
                     cleaned_physical += 1
-                
-                # 删除数据库记录（级联删除报告）
-                db.delete(audio_file)
-                cleaned_db_records += 1
-                
             except Exception as e:
                 errors.append(f"删除文件 {audio_file.file_id} 失败: {e}")
-        
-        db.commit()
-        
+
+        # 兜底：按 mtime 清理 uploads 目录中无 DB 记录的孤立文件
+        await cleanup_old_files(expire_hours)
+
         # 记录清理日志
         log_msg = (
             f"✅ 清理完成 | 物理文件: {cleaned_physical} 个"
-            f" | DB记录: {cleaned_db_records} 条"
+            f" | 过期阈值: {expire_hours} 小时"
             f" | 错误: {len(errors)}"
         )
         logger.info(log_msg)
-        
+
         if errors:
             for err in errors[:5]:  # 只记录前5条错误
                 logger.error(f"清理异常: {err}")
-        
+
     except Exception as e:
         logger.error(f"❌ 定时清理任务异常: {e}")
-        db.rollback()
     finally:
         db.close()
 

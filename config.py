@@ -32,7 +32,7 @@ class Settings:
     # 文件存储
     UPLOAD_DIR = os.getenv("UPLOAD_DIR", str(BASE_DIR / "uploads"))
     MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", "100"))  # MB
-    FILE_EXPIRE_HOURS = int(os.getenv("FILE_EXPIRE_HOURS", "168"))  # 7天后自动删除
+    FILE_EXPIRE_HOURS = int(os.getenv("FILE_EXPIRE_HOURS", "720"))  # 30天后自动删除录音物理文件（DB记录与报告永久保留）
     
     # CORS（生产环境请设置 CORS_ORIGINS=https://your-domain.com）
     _cors_raw = os.getenv("CORS_ORIGINS", "").strip()
