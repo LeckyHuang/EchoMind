@@ -292,40 +292,120 @@ class ASRService:
             logger.error(f"豆包ASR请求异常: {e}")
             return {"success": False, "text": "", "error": str(e)}
 
-    # ==================== 阿里云 ASR (通义) ====================
+    # ==================== 阿里云 ASR (通义 / 百炼 Fun-ASR) ====================
+
+    def _extract_funasr_text(self, transcription: dict) -> str:
+        """从 Fun-ASR 转写结果 JSON 中提取文本"""
+        texts = []
+        for transcript in transcription.get("transcripts", []):
+            text = transcript.get("text", "")
+            if text:
+                texts.append(text)
+        return "\n".join(texts)
 
     async def _transcribe_qwen(self, file_path: str) -> dict:
-        """阿里云 ASR"""
+        """阿里云百炼 Fun-ASR 录音文件识别（异步任务 + 轮询）"""
         api_key = asr_settings.QWEN_API_KEY
-        app_key = asr_settings.QWEN_APP_KEY
 
-        if not api_key or not app_key:
+        if not api_key or api_key == "placeholder":
+            logger.warning("百炼ASR未配置API Key，使用模拟模式")
             return await self._mock_transcribe(file_path)
 
-        url = "https://nls-gateway.cn-shanghai.aliyuncs.com/stream/v1/asr"
+        # 生成临时下载 URL，供百炼服务端拉取音频文件
+        from utils.file_utils import create_asr_temp_url
+        filename = Path(file_path).name
+        file_url = create_asr_temp_url(filename, expire_seconds=1800)
 
-        with open(file_path, "rb") as f:
-            audio_data = f.read()
+        logger.info(f"Fun-ASR开始处理: {filename}, url={file_url}")
+
+        submit_url = "https://dashscope.aliyuncs.com/api/v1/services/audio/asr/transcription"
+        query_base_url = "https://dashscope.aliyuncs.com/api/v1/tasks/"
 
         headers = {
-            "X-NLS-Token": api_key,
-            "Content-Type": "audio/pcm; rate=16000",
-            "X-App-Key": app_key
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "X-DashScope-Async": "enable"
+        }
+
+        payload = {
+            "model": "fun-asr",
+            "input": {
+                "file_urls": [file_url]
+            },
+            "parameters": {
+                "channel_id": [0],
+                "language_hints": ["zh", "en"]
+            }
         }
 
         try:
             async with httpx.AsyncClient(timeout=60, trust_env=False) as client:
-                resp = await client.post(url, content=audio_data, headers=headers)
-                if resp.status_code == 200:
+                # 1. 提交任务
+                resp = await client.post(submit_url, json=payload, headers=headers)
+                if resp.status_code != 200:
+                    logger.error(f"Fun-ASR提交失败: {resp.status_code} {resp.text}")
+                    return {"success": False, "text": "", "error": f"提交失败: {resp.status_code}"}
+
+                result = resp.json()
+                output = result.get("output", {})
+                task_id = output.get("task_id")
+                if not task_id:
+                    logger.error(f"Fun-ASR提交响应异常: {result}")
+                    return {"success": False, "text": "", "error": "提交响应异常，未返回 task_id"}
+
+                logger.info(f"Fun-ASR任务已提交: {task_id}")
+
+                # 2. 轮询查询结果
+                query_headers = {"Authorization": f"Bearer {api_key}"}
+                for i in range(180):  # 最多 180 * 2s = 6 分钟
+                    await asyncio.sleep(2)
+
+                    resp = await client.get(f"{query_base_url}{task_id}", headers=query_headers)
+                    if resp.status_code != 200:
+                        logger.error(f"Fun-ASR查询失败: {resp.status_code} {resp.text}")
+                        continue
+
                     result = resp.json()
-                    return {
-                        "success": True,
-                        "text": result.get("payload", {}).get("text", ""),
-                        "duration": result.get("payload", {}).get("duration", 0)
-                    }
-                else:
-                    return {"success": False, "text": "", "error": f"API错误: {resp.status_code}"}
+                    output = result.get("output", {})
+                    task_status = output.get("task_status", "")
+                    logger.info(f"Fun-ASR任务状态: {task_status} ({i+1}/180)")
+
+                    if task_status == "SUCCEEDED":
+                        results = output.get("results", [])
+                        if not results:
+                            return {"success": False, "text": "", "error": "转写结果为空"}
+
+                        transcription_url = results[0].get("transcription_url", "")
+                        if not transcription_url:
+                            return {"success": False, "text": "", "error": "转写结果URL为空"}
+
+                        # 下载 JSON 转写结果
+                        resp = await client.get(transcription_url, timeout=60)
+                        if resp.status_code != 200:
+                            return {"success": False, "text": "", "error": f"下载转写结果失败: {resp.status_code}"}
+
+                        transcription = resp.json()
+                        text = self._extract_funasr_text(transcription)
+                        logger.info(f"Fun-ASR识别成功，文字长度: {len(text)}")
+                        return {"success": True, "text": text}
+
+                    elif task_status == "FAILED":
+                        error_message = output.get("message", "未知错误")
+                        logger.error(f"Fun-ASR任务失败: {error_message}")
+                        return {"success": False, "text": "", "error": f"识别失败: {error_message}"}
+
+                    elif task_status in ["UNKNOWN", "CANCELLED"]:
+                        return {"success": False, "text": "", "error": f"任务状态异常: {task_status}"}
+
+                    # PENDING / RUNNING 继续轮询
+
+                return {"success": False, "text": "", "error": "识别超时，请检查音频文件或网络连接"}
+
+        except httpx.HTTPError as e:
+            logger.error(f"Fun-ASR网络错误: {e}")
+            return {"success": False, "text": "", "error": f"网络错误: {str(e)}"}
         except Exception as e:
+            logger.error(f"Fun-ASR请求异常: {e}")
             return {"success": False, "text": "", "error": str(e)}
 
     # ==================== 腾讯云 ASR ====================

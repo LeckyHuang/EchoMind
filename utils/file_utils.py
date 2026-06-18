@@ -9,13 +9,48 @@ import uuid
 import asyncio
 import aiofiles
 import logging
+import time
 from pathlib import Path
 from datetime import datetime
 from typing import Tuple, Optional
 
+from jose import jwt, JWTError
+
 from config import settings
 
 logger = logging.getLogger(__name__)
+
+# 临时 ASR 下载 URL 配置
+_ASR_TEMP_URL_EXPIRE_SECONDS = 1800  # 30 分钟，给百炼下载 + 识别足够时间
+_ASR_TEMP_URL_SECRET = settings.SECRET_KEY or "echomind-secret-key-change-in-production"
+
+
+def create_asr_temp_url(filename: str, expire_seconds: int = _ASR_TEMP_URL_EXPIRE_SECONDS) -> str:
+    """
+    生成供百炼 Fun-ASR 临时下载音频的签名 URL
+    :param filename: uploads 目录下的文件名
+    :param expire_seconds: URL 有效期（秒）
+    :return: 完整临时 URL，如 https://your-domain.com/asr-temp/{token}/{filename}
+    """
+    payload = {
+        "file": filename,
+        "exp": time.time() + expire_seconds
+    }
+    token = jwt.encode(payload, _ASR_TEMP_URL_SECRET, algorithm="HS256")
+    # 优先使用外部可访问域名，否则回退到相对路径（本地开发测试用）
+    base_url = settings.ASR_TEMP_BASE_URL or "http://localhost:8000"
+    return f"{base_url}/asr-temp/{token}/{filename}"
+
+
+def verify_asr_temp_token(token: str, expected_filename: str) -> bool:
+    """
+    校验 ASR 临时下载 token 是否有效且文件名匹配
+    """
+    try:
+        payload = jwt.decode(token, _ASR_TEMP_URL_SECRET, algorithms=["HS256"])
+        return payload.get("file") == expected_filename
+    except JWTError:
+        return False
 
 
 async def save_audio_file(file, custom_filename: str = None) -> Tuple[str, str, float]:

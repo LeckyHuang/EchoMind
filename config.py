@@ -42,18 +42,25 @@ class Settings:
     SSL_CERTFILE = os.getenv("SSL_CERTFILE", "")   # 证书文件路径，如 /path/to/cert.pem
     SSL_KEYFILE  = os.getenv("SSL_KEYFILE",  "")   # 私钥文件路径，如 /path/to/key.pem
 
+    # 供百炼 Fun-ASR 临时下载音频的公网基地址（必须能被百炼服务端访问）
+    # 例如：https://recorder.sugarcard.cn
+    ASR_TEMP_BASE_URL = os.getenv("ASR_TEMP_BASE_URL", "")
+
+    # JWT / 临时签名密钥（用于 ASR 临时下载链接等）
+    SECRET_KEY = os.getenv("SECRET_KEY", os.getenv("JWT_SECRET_KEY", "echomind-secret-key-change-in-production"))
+
 
 # ==================== ASR 配置 ====================
 
 class ASRSettings:
     """ASR 服务配置"""
     
-    # ASR 提供商: qwen(阿里云), doubao(豆包), tencent(腾讯云), baidu(百度)
+    # ASR 提供商: qwen(阿里云Fun-ASR), doubao(豆包), tencent(腾讯云), baidu(百度), minimax(Mock)
     PROVIDER = os.getenv("ASR_PROVIDER", "qwen")
-    
-    # 阿里云 ASR (通义)
+
+    # 阿里云 ASR (通义 / 百炼 Fun-ASR)
     QWEN_API_KEY = os.getenv("QWEN_API_KEY", "placeholder")
-    QWEN_APP_KEY = os.getenv("QWEN_APP_KEY", "")  # 项目AppKey
+    QWEN_APP_KEY = os.getenv("QWEN_APP_KEY", "")  # 已废弃，保留仅兼容旧配置
     
     # 豆包 ASR
     DOUBAO_APP_ID = os.getenv("DOUBAO_APP_ID", "")

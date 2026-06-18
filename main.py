@@ -15,7 +15,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -25,7 +25,7 @@ from models import init_db, get_db, User, AudioFile, AnalysisReport, PromptTempl
 from auth import get_current_user
 from services.asr_service import ASRService
 from services.llm_service import LLMService
-from utils.file_utils import save_audio_file, cleanup_old_files
+from utils.file_utils import save_audio_file, cleanup_old_files, verify_asr_temp_token
 from routers.auth_router import router as auth_router
 from routers.file_router import router as file_router
 from routers.prompt_router import router as prompt_router
@@ -137,6 +137,23 @@ app.mount("/app/echodmind", StaticFiles(directory=str(Path(__file__).parent / "f
 _photos_dir = Path(__file__).parent / "uploads" / "photos"
 _photos_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/uploads/photos", StaticFiles(directory=str(_photos_dir)), name="photos")
+
+
+# 供百炼 Fun-ASR 临时下载音频（签名 URL，短期有效）
+@app.get("/asr-temp/{token}/{filename}")
+async def serve_asr_temp_file(token: str, filename: str):
+    """
+    百炼 Fun-ASR 识别前需要拉取音频文件，
+    本端点生成短期签名 URL，token 过期后自动失效。
+    """
+    if not verify_asr_temp_token(token, filename):
+        raise HTTPException(status_code=403, detail="临时链接已失效或无效")
+
+    file_path = Path(settings.UPLOAD_DIR) / filename
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="音频文件不存在")
+
+    return FileResponse(path=str(file_path), media_type="audio/mpeg", filename=filename)
 
 
 # ==================== 请求/响应模型 ====================
