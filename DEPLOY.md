@@ -82,36 +82,45 @@ nano .env
 # ==================== 服务配置 ====================
 DEBUG=false
 HOST=0.0.0.0
-PORT=8000
+PORT=8088
 UPLOAD_DIR=./uploads
 MAX_FILE_SIZE=100
 FILE_EXPIRE_HOURS=168
 CORS_ORIGINS=*
 
-# ==================== ASR 配置 ====================
-ASR_PROVIDER=doubao
+# 供百炼 Fun-ASR 临时下载音频的公网基地址（必须能被百炼服务端访问）
+# 录音文件仍保存在本服务器，仅通过短期签名 URL 暴露给百炼拉取
+ASR_TEMP_BASE_URL=https://your-domain.com
 
-DOUBAO_APP_ID=2244278624
-DOUBAO_TOKEN=8rMZhl2nzdWv56dzG9657KrWsahJ6t3T
-DOUBAO_ACCESS_KEY=8rMZhl2nzdWv56dzG9657KrWsahJ6t3T
-DOUBAO_SECRET_KEY=rDJfh8iRPadQI7sCNsbmkGxFeBgZzktg
+# ==================== ASR 配置 ====================
+# 默认使用阿里云百炼 Fun-ASR（支持长录音）；如需切回豆包，改为 doubao
+ASR_PROVIDER=qwen
+
+# 阿里云百炼 Fun-ASR（ASR_PROVIDER=qwen 时生效）
+QWEN_API_KEY=your_dashscope_api_key
+
+# 豆包 ASR（ASR_PROVIDER=doubao 时生效）
+DOUBAO_APP_ID=your_doubao_app_id
+DOUBAO_ACCESS_KEY=your_doubao_access_key
+DOUBAO_SECRET_KEY=your_doubao_secret_key
 
 # ==================== LLM 配置 ====================
 LLM_PROVIDER=qwen
 
-QWEN_API_KEY=sk-15aacf485c9247a1afb4c22f32c4f421
+QWEN_API_KEY=your_qwen_api_key
 QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-QWEN_MODEL=qwen3.5-plus
+QWEN_MODEL=qwen-plus
 
 # ==================== JWT 密钥（建议改成随机字符串）====================
 SECRET_KEY=请替换为随机长字符串，例如：openssl rand -hex 32 的输出
+JWT_SECRET_KEY=${SECRET_KEY}
 ```
 
 > **生成随机 SECRET_KEY**：
 > ```bash
 > openssl rand -hex 32
 > ```
-> 把输出填入 `SECRET_KEY=` 后面。
+> 把输出填入 `SECRET_KEY=` 后面。`ASR_TEMP_BASE_URL` 必须改为服务器公网可访问地址（如 `https://echomind.yourdomain.com` 或 `http://your-server-ip:8088`），否则百炼无法拉取音频。
 
 ### 3.3 创建必要目录并初始化数据库
 
@@ -130,42 +139,42 @@ python3 init_admin.py   # 创建 admin 账号（默认密码 123456，建议登�
 ### 4.1 创建 service 文件
 
 ```bash
-sudo nano /etc/systemd/system/voicerecorder.service
+sudo nano /etc/systemd/system/echomind.service
 ```
 
 粘贴以下内容（注意替换 `user` 为你的服务器用户名）：
 
 ```ini
 [Unit]
-Description=Voicerecorder Backend (FastAPI + uvicorn)
+Description=EchoMind Backend (FastAPI + uvicorn)
 After=network.target
 
 [Service]
 User=root
-WorkingDirectory=/opt/voicerecorder
-ExecStart=/opt/voicerecorder/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2
+WorkingDirectory=/opt/echomind
+ExecStart=/opt/echomind/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8088 --workers 2
 Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
-Environment="PATH=/opt/voicerecorder/venv/bin"
+Environment="PATH=/opt/echomind/venv/bin"
 
 [Install]
 WantedBy=multi-user.target
 ```
 
 > 如果服务器用的是非 root 用户（推荐），将 `User=root` 改为实际用户名，
-> 并确保该用户对 `/opt/voicerecorder` 有读写权限。
+> 并确保该用户对 `/opt/echomind` 有读写权限。
 
 ### 4.2 启动并设置开机自启
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable voicerecorder
-sudo systemctl start voicerecorder
+sudo systemctl enable echomind
+sudo systemctl start echomind
 
 # 确认运行状态
-sudo systemctl status voicerecorder
+sudo systemctl status echomind
 ```
 
 看到 `active (running)` 即表示成功。
@@ -173,7 +182,7 @@ sudo systemctl status voicerecorder
 ### 4.3 查看实时日志
 
 ```bash
-sudo journalctl -u voicerecorder -f
+sudo journalctl -u echomind -f
 ```
 
 ---
@@ -252,12 +261,12 @@ http://your-server-ip:8000
 
 | 操作 | 命令 |
 |------|------|
-| 重启服务 | `sudo systemctl restart voicerecorder` |
-| 停止服务 | `sudo systemctl stop voicerecorder` |
-| 查看日志 | `sudo journalctl -u voicerecorder -f` |
-| 更新代码后重启 | `sudo systemctl restart voicerecorder` |
-| 查看上传文件 | `ls -lh /opt/voicerecorder/uploads/` |
-| 查看数据库 | `sqlite3 /opt/voicerecorder/data/voicerecorder.db ".tables"` |
+| 重启服务 | `sudo systemctl restart echomind` |
+| 停止服务 | `sudo systemctl stop echomind` |
+| 查看日志 | `sudo journalctl -u echomind -f` |
+| 更新代码后重启 | `sudo systemctl restart echomind` |
+| 查看上传文件 | `ls -lh /opt/echomind/uploads/` |
+| 查看数据库 | `sqlite3 /opt/echomind/data/echodmind.db ".tables"` |
 
 ---
 
@@ -300,8 +309,33 @@ sudo ufw allow 80/tcp
 
 | 现象 | 可能原因 | 解法 |
 |------|----------|------|
-| `systemctl status` 显示 failed | `.env` 缺字段 / Python 包未装 | `journalctl -u voicerecorder -n 50` 查详细报错 |
-| 上传成功但 ASR 返回空 | 豆包 Token 过期 | 更新 `.env` 中的 `DOUBAO_TOKEN` 后重启 |
+| `systemctl status` 显示 failed | `.env` 缺字段 / Python 包未装 | `journalctl -u echomind -n 50` 查详细报错 |
+| 上传成功但 ASR 返回空 | 百炼 API Key 余额不足 / `ASR_TEMP_BASE_URL` 不可达 | 检查 DashScope 余额；确认 `ASR_TEMP_BASE_URL` 能被公网访问 |
+| 上传成功但 ASR 返回空（doubao） | 豆包 Token 过期 | 更新 `.env` 中的 `DOUBAO_TOKEN` 后重启 |
 | LLM 返回 `choices: null` | Qwen API Key 余额不足 | 充值或换 `LLM_PROVIDER` |
-| App 上传失败 | 防火墙未放行 / IP 填错 | 先用浏览器确认 `http://ip:8000/` 能访问 |
+| App 上传失败 | 防火墙未放行 / IP 填错 | 先用浏览器确认 `http://ip:8088/` 能访问 |
 | 管理后台跨域报错 | `CORS_ORIGINS` 配置 | 确认 `.env` 中 `CORS_ORIGINS=*` |
+
+---
+
+## 十二、本次 ASR 迁移 FTP 上传清单
+
+如使用 FTP 增量更新，把以下文件上传到服务器 `/opt/echomind/` 目录（覆盖原文件），然后重启服务：
+
+```
+services/asr_service.py
+utils/file_utils.py
+config.py
+main.py
+.env
+.env.example
+DEPLOY.md
+```
+
+重启命令：
+
+```bash
+sudo systemctl restart echomind
+```
+
+> 注意：上传 `.env` 前请确认服务器上的真实密钥（`QWEN_API_KEY`、`SECRET_KEY`、`ASR_TEMP_BASE_URL`）已正确填写，不要覆盖为示例值。
