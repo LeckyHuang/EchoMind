@@ -170,6 +170,35 @@ def get_stats(days: int = Query(7, ge=1, le=90), _: None = Depends(_check_obs_au
     def rows_to_list(rows):
         return [dict(r) for r in rows]
 
+    # ── 按操作聚合（LLM 调用 + SPAN）────────────────────────────
+    try:
+        _llm_ops = conn.execute("""
+            SELECT operation, 'llm' AS span_type,
+                   COUNT(*) AS calls,
+                   ROUND(AVG(latency_ms), 0) AS avg_latency_ms,
+                   CAST(SUM(input_tokens) AS INTEGER) AS input_tokens,
+                   CAST(SUM(output_tokens) AS INTEGER) AS output_tokens,
+                   SUM(cost_cny) AS cost_cny,
+                   SUM(CASE WHEN status='error' THEN 1 ELSE 0 END) AS errors
+            FROM llm_calls WHERE ts >= ?
+            GROUP BY operation
+        """, (since,)).fetchall()
+        _span_ops = conn.execute("""
+            SELECT operation, 'span' AS span_type,
+                   COUNT(*) AS calls,
+                   ROUND(AVG(latency_ms), 0) AS avg_latency_ms,
+                   NULL AS input_tokens, NULL AS output_tokens, NULL AS cost_cny,
+                   SUM(CASE WHEN status='error' THEN 1 ELSE 0 END) AS errors
+            FROM spans WHERE start_ts >= ?
+            GROUP BY operation
+        """, (since,)).fetchall()
+        by_operation = sorted(
+            rows_to_list(_llm_ops) + rows_to_list(_span_ops),
+            key=lambda x: -(x["calls"] or 0),
+        )
+    except Exception:
+        by_operation = []
+
     return JSONResponse({
         "summary":             summary,
         "latency_percentiles": latency_percentiles,
@@ -180,6 +209,7 @@ def get_stats(days: int = Query(7, ge=1, le=90), _: None = Depends(_check_obs_au
         "recent_calls":        rows_to_list(recent_calls),
         "asr_stats":           asr_list,
         "error_breakdown":     error_breakdown,
+        "by_operation":        by_operation,
     })
 
 
