@@ -140,7 +140,11 @@ class AudioFile(Base):
     # 状态
     upload_status = Column(String(20), default=UploadStatus.PENDING.value)
     asr_text = Column(Text, nullable=True)                 # ASR转写文本
-    
+
+    # 分段录音归属（异步分段串联，2026-07-28）
+    session_id = Column(String(36), nullable=True, index=True)  # 所属会话，单文件上传为空
+    segment_index = Column(Integer, nullable=True)              # 段序号，从 0 起
+
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
@@ -162,6 +166,8 @@ class AudioFile(Base):
             "duration": self.duration,
             "file_format": self.file_format,
             "upload_status": self.upload_status,
+            "session_id": self.session_id,
+            "segment_index": self.segment_index,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -212,6 +218,44 @@ class AnalysisReport(Base):
             "user_id": self.user_id,
             "report_type": self.report_type,
             "status": self.status,
+            "error_message": self.error_message,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class RecordingSession(Base):
+    """录音会话：一次录音（可含多段），异步分段串联（2026-07-28）"""
+    __tablename__ = "recording_sessions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(String(36), unique=True, nullable=False, index=True)  # 客户端生成
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    title = Column(String(255), nullable=True)
+    status = Column(String(20), default="recording", index=True)  # recording/analyzing/generating/completed/failed
+    total_segments = Column(Integer, nullable=True)   # finalize 时由客户端声明
+    task_types = Column(JSON, nullable=True)          # 分析类型名列表
+    supplementary_text = Column(Text, nullable=True)
+    merged_file_id = Column(Integer, ForeignKey("audio_files.id", ondelete="SET NULL"), nullable=True)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<RecordingSession(session_id={self.session_id}, status={self.status})>"
+
+    def to_dict(self):
+        """转为字典"""
+        return {
+            "id": self.id,
+            "session_id": self.session_id,
+            "user_id": self.user_id,
+            "title": self.title,
+            "status": self.status,
+            "total_segments": self.total_segments,
+            "task_types": self.task_types,
+            "supplementary_text": self.supplementary_text,
+            "merged_file_id": self.merged_file_id,
             "error_message": self.error_message,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
