@@ -52,7 +52,7 @@
 | `session_id` | String(36) unique index | **客户端生成**的 UUID，开录时确定 |
 | `user_id` | FK users.id | |
 | `title` | String(255) | 默认取首段文件名 |
-| `status` | String(20) index | `recording` / `analyzing` / `completed` / `failed` |
+| `status` | String(20) index | `recording` / `analyzing` / `generating` / `completed` / `failed`（`generating` 见 4.3） |
 | `total_segments` | Integer nullable | finalize 时由客户端声明；未 finalize 时为 NULL |
 | `task_types` | JSON | finalize 时传入的分析类型名列表 |
 | `supplementary_text` | Text nullable | 用户补充说明 |
@@ -110,16 +110,35 @@
 - **提交**：`POST /api/v1/segments` 落库后创建 asyncio task 跑该段 ASR。全局并发上限 **3**（`asyncio.Semaphore`），防打爆豆包 ASR 配额与限流。
 - **段完成回调**：写回 `asr_text` + `upload_status=completed`，然后调用「到齐检查」。
 - **到齐检查**（唯一的分析触发点，幂等）：当 `session.total_segments` 非空、且该 session 下所有段都已 `completed` 或 `failed` 时，按 `segment_index` 排序拼接文本 → 建虚拟 merged AudioFile → 复用 `analyze/merge` 的 LLM 并发分析逻辑 → 写报告 + 生成分享页 → session 转 `completed`。
-- **重启续跑**：应用启动时扫描 `upload_status IN (pending, processing)` 的段，重新提交 ASR；并对所有 `status=analyzing` 的 session 跑一次到齐检查。这是 workers 必须为 1 的直接原因。
+- **重启续跑**：应用启动时扫描 `upload_status IN (pending, processing)` 的段，重新提交 ASR；并对所有 `status IN (analyzing, generating)` 的 session 跑一次到齐检查（`generating` 的先退回 `analyzing`，见下）。这是 workers 必须为 1 的直接原因。
 
 状态流转：
 
 ```
 segment:  pending -> processing -> completed | failed
-session:  recording -> analyzing -> completed | failed
+session:  recording -> analyzing -> generating -> completed | failed
 ```
 
-`recording → analyzing` 只由 finalize 触发；`analyzing → completed` 只由到齐检查触发。
+| 会话状态 | 含义 | 入口 | 出口 |
+|---|---|---|---|
+| `recording` | 已开录，尚未 finalize，总段数未知 | 首段上传时隐式创建 | finalize → `analyzing`；超 24 小时未 finalize → `failed`（孤儿清理） |
+| `analyzing` | 总段数已声明，等各段 ASR 到齐 | finalize | 到齐检查抢锁成功 → `generating`；全段失败 → `failed` |
+| `generating` | 已进入 LLM 分析（**幂等锁**） | 到齐检查的条件原子推进 | 分析完成 → `completed`；分析异常 → `failed`；进程重启 → 由续跑扫描退回 `analyzing` |
+| `completed` | 报告已生成 | 分析完成 | 终态 |
+| `failed` | 全段转写失败 / 分析异常 / 孤儿清理 | 见上 | 终态 |
+
+`recording → analyzing` 只由 finalize 触发；`analyzing → generating → completed` 只由到齐检查触发。
+
+**关于 `generating`**：`finalize` 与「最后一段 ASR 完成」是两个互相独立、可能同时发生的事件，都会调用到齐检查，而分析必须且只能跑一轮（多跑一轮就多扣一次 LLM 费）。幂等锁的实现是条件原子推进：
+
+```sql
+UPDATE recording_sessions SET status='generating'
+ WHERE session_id=? AND status='analyzing'
+```
+
+只有 `rowcount == 1` 的那一次调用继续往下调 LLM，其余一律返回 False。这条 UPDATE 必须在**任何 `await` 之前**完成并提交——单事件循环内因此不存在「检查」与「占位」之间的让出点。
+
+**重启续跑必须把 `generating` 退回 `analyzing`**：`generating` 表示「进了 LLM 但没跑完就重启」，若不退回，到齐检查会因状态不是 `analyzing` 直接返回，该会话永远卡死。
 
 ### 4.4 错误处理与降级
 
