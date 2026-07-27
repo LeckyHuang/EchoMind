@@ -11,8 +11,6 @@ import json
 import time
 import uuid
 import base64
-import hmac
-import hashlib
 from pathlib import Path
 from typing import Optional
 import logging
@@ -78,7 +76,7 @@ class ASRService:
             return {"success": False, "text": "", "error": str(e)}
 
     async def _mock_transcribe(self, file_path: str) -> dict:
-        """模拟转写 - 用于测试"""
+        """模拟转写 - 仅在 ASR_PROVIDER=mock 时可用"""
         logger.info(f"使用模拟转写模式，文件: {file_path}")
         await asyncio.sleep(1)
         mock_text = """
@@ -99,7 +97,8 @@ class ASRService:
         group_id = asr_settings.MINIMAX_GROUP_ID
 
         if not api_key:
-            return await self._mock_transcribe(file_path)
+            logger.error("MiniMax ASR未配置API Key")
+            return {"success": False, "text": "", "error": "MiniMax ASR 未配置 API Key"}
 
         url = "https://api.minimax.chat/v1/audio_transcription"
         if group_id:
@@ -125,40 +124,49 @@ class ASRService:
             return {"success": False, "text": "", "error": str(e)}
 
     # ==================== 豆包 ASR V3 (火山引擎) ====================
+    # 鉴权采用静态 Header（X-Api-App-Key + X-Api-Access-Key），实测无需 Authorization 签名头，
+    # 因此不再手搓 HMAC 签名（原 _generate_volc_token 已删除）。
 
-    def _generate_volc_token(self, access_token: str, secret_key: str) -> str:
-        """生成火山引擎签名 Token"""
-        import datetime
-        now = datetime.datetime.utcnow()
-        expire = now + datetime.timedelta(hours=1)
+    def _extract_doubao_text(self, result: dict) -> tuple:
+        """
+        从豆包 ASR 结果中提取文本。
+        返回 (纯文本, 带说话人标签文本)。
+        utterances 缺失或没有 speaker 字段时，speaker_text 为空字符串，调用方应回退到纯文本。
+        """
+        plain_text = result.get("text", "") or ""
+        utterances = result.get("utterances") or []
 
-        sign_str = "".join([
-            f"GET\n",
-            f"/api/v3/auc/bigmodel/submit\n",
-            f"host:openspeech.bytedance.com\n",
-            f"date: {now.strftime('%Y%m%dT%H%M%SZ')}\n",
-            f"action: BigmodelAudioSubmit\n",
-            f"version: 2024-03-01\n",
-            f"{expire.strftime('%Y%m%dT%H%M%SZ')}"
-        ])
+        if not utterances:
+            return plain_text, ""
 
-        signature = hmac.new(
-            secret_key.encode('utf-8'),
-            sign_str.encode('utf-8'),
-            hashlib.sha256
-        ).hexdigest()
+        lines = []
+        has_speaker = False
+        for utt in utterances:
+            utt_text = (utt.get("text") or "").strip()
+            if not utt_text:
+                continue
+            speaker = (utt.get("additions") or {}).get("speaker")
+            if speaker:
+                has_speaker = True
+                lines.append(f"[说话人{speaker}] {utt_text}")
+            else:
+                lines.append(utt_text)
 
-        return f"Bearer; {access_token}; {signature}"
+        if not has_speaker:
+            # 没有任何说话人信息，优雅降级回纯文本
+            return plain_text, ""
+
+        return plain_text, "\n".join(lines)
 
     async def _transcribe_doubao(self, file_path: str) -> dict:
-        """豆包 ASR V3 - 录音文件识别标准版"""
+        """豆包 ASR V3 - 录音文件识别标准版，含说话人分离"""
         app_id = asr_settings.DOUBAO_APP_ID
         access_key = asr_settings.DOUBAO_ACCESS_KEY
-        secret_key = asr_settings.DOUBAO_SECRET_KEY
+        resource_id = getattr(asr_settings, "DOUBAO_RESOURCE_ID", "volc.seedasr.auc")
 
-        if not access_key:
-            logger.warning("豆包ASR未配置Token，使用模拟模式")
-            return await self._mock_transcribe(file_path)
+        if not access_key or not app_id:
+            logger.error("豆包ASR未配置 DOUBAO_APP_ID / DOUBAO_ACCESS_KEY")
+            return {"success": False, "text": "", "error": "豆包 ASR 未配置 APP_ID / ACCESS_KEY"}
 
         request_id = str(uuid.uuid4())
         file_ext = Path(file_path).suffix.lower().replace(".", "")
@@ -203,13 +211,11 @@ class ASRService:
                 pass
 
         submit_url = "https://openspeech.bytedance.com/api/v3/auc/bigmodel/submit"
-        authorization = self._generate_volc_token(access_key, secret_key)
 
         headers = {
-            "Authorization": authorization,
             "X-Api-Access-Key": access_key,
             "X-Api-App-Key": app_id,
-            "X-Api-Resource-Id": "volc.bigasr.auc",
+            "X-Api-Resource-Id": resource_id,
             "X-Api-Request-Id": request_id,
             "X-Api-Sequence": "-1",
             "Content-Type": "application/json"
@@ -228,7 +234,8 @@ class ASRService:
                 "model_name": "bigmodel",
                 "enable_itn": True,
                 "enable_punc": True,
-                "show_utterances": True
+                "show_utterances": True,
+                "enable_speaker_info": True
             }
         }
 
@@ -251,15 +258,16 @@ class ASRService:
 
                 query_url = "https://openspeech.bytedance.com/api/v3/auc/bigmodel/query"
                 query_headers = {
-                    "Authorization": authorization,
                     "X-Api-Access-Key": access_key,
                     "X-Api-App-Key": app_id,
-                    "X-Api-Resource-Id": "volc.bigasr.auc",
+                    "X-Api-Resource-Id": resource_id,
                     "X-Api-Request-Id": request_id,
                     "Content-Type": "application/json"
                 }
 
-                for i in range(90):
+                # 轮询上限 20 分钟（600 * 2s）
+                max_polls = 600
+                for i in range(max_polls):
                     await asyncio.sleep(2)
 
                     resp = await client.post(query_url, json={}, headers=query_headers, timeout=30)
@@ -267,12 +275,18 @@ class ASRService:
 
                     if result_status == "20000000":
                         result_body = resp.json()
-                        text = result_body.get("result", {}).get("text", "")
+                        result = result_body.get("result", {})
+                        text, speaker_text = self._extract_doubao_text(result)
                         logger.info(f"豆包ASR识别成功，文字长度: {len(text)}")
-                        return {"success": True, "text": text}
+                        return {
+                            "success": True,
+                            "text": speaker_text or text,
+                            "raw_text": text,
+                            "utterances": result.get("utterances", []),
+                        }
 
                     elif result_status in ["20000001", "20000002"]:
-                        logger.info(f"豆包ASR处理中... ({i+1}/30)")
+                        logger.info(f"豆包ASR处理中... ({i+1}/{max_polls})")
                         continue
 
                     elif result_status == "20000003":
@@ -308,8 +322,8 @@ class ASRService:
         api_key = asr_settings.QWEN_API_KEY
 
         if not api_key or api_key == "placeholder":
-            logger.warning("百炼ASR未配置API Key，使用模拟模式")
-            return await self._mock_transcribe(file_path)
+            logger.error("百炼ASR未配置API Key")
+            return {"success": False, "text": "", "error": "百炼 ASR 未配置 API Key"}
 
         # 生成临时下载 URL，供百炼服务端拉取音频文件
         from utils.file_utils import create_asr_temp_url
@@ -411,8 +425,8 @@ class ASRService:
     # ==================== 腾讯云 ASR ====================
 
     async def _transcribe_tencent(self, file_path: str) -> dict:
-        """腾讯云 ASR"""
-        return await self._mock_transcribe(file_path)
+        """腾讯云 ASR（未实现）"""
+        return {"success": False, "text": "", "error": "腾讯云 ASR 尚未实现"}
 
     # ==================== 百度 ASR ====================
 
@@ -422,7 +436,8 @@ class ASRService:
         secret_key = asr_settings.BAIDU_SECRET_KEY
 
         if not api_key or not secret_key:
-            return await self._mock_transcribe(file_path)
+            logger.error("百度ASR未配置API Key / Secret Key")
+            return {"success": False, "text": "", "error": "百度 ASR 未配置 API Key / Secret Key"}
 
         try:
             async with httpx.AsyncClient(timeout=60, trust_env=False) as client:

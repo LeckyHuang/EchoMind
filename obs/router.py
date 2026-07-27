@@ -279,12 +279,20 @@ def get_traces(limit: int = Query(20, ge=1, le=100), days: int = Query(7, ge=1, 
 
         all_spans.sort(key=lambda x: x["start_ts"])
         trace_start = all_spans[0]["start_ts"]
-        trace_end = max(s["end_ts"] or s["start_ts"] for s in all_spans)
+
+        # Compute total_latency_ms from (start_offset + latency_ms) instead of end_ts.
+        # end_ts in the spans table can be corrupted (e.g. a hung connection records a
+        # huge end_ts), which would inflate the trace duration to hours. latency_ms is
+        # written at span creation time and is reliable.
+        total_latency_ms = max(
+            int((s["start_ts"] - trace_start) * 1000) + (s["latency_ms"] or 0)
+            for s in all_spans
+        )
 
         result.append({
             "trace_id": tid,
             "start_ts": trace_start,
-            "total_latency_ms": int((trace_end - trace_start) * 1000),
+            "total_latency_ms": max(total_latency_ms, 0),
             "status": "error" if any(s["status"] == "error" for s in all_spans) else "ok",
             "spans": all_spans,
         })

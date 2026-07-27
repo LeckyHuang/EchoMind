@@ -65,7 +65,9 @@ class ASRSettings:
     # 豆包 ASR
     DOUBAO_APP_ID = os.getenv("DOUBAO_APP_ID", "")
     DOUBAO_ACCESS_KEY = os.getenv("DOUBAO_ACCESS_KEY", "")  # 火山引擎 Access Key
-    DOUBAO_SECRET_KEY = os.getenv("DOUBAO_SECRET_KEY", "")  # 火山引擎 Secret Key
+    DOUBAO_SECRET_KEY = os.getenv("DOUBAO_SECRET_KEY", "")  # 火山引擎 Secret Key（已废弃：静态 Key 鉴权不再需要签名，保留仅兼容旧配置读取）
+    # 火山引擎 ASR Resource-Id：volc.bigasr.auc(旧/免费额度已耗尽) -> volc.seedasr.auc(实测可用)
+    DOUBAO_RESOURCE_ID = os.getenv("DOUBAO_RESOURCE_ID", "volc.seedasr.auc")
     
     # 腾讯云 ASR
     TENCENT_SECRET_ID = os.getenv("TENCENT_SECRET_ID", "")
@@ -103,7 +105,7 @@ class LLMSettings:
     # 豆包 (Doubao)
     DOUBAO_API_KEY = os.getenv("DOUBAO_API_KEY", "")
     DOUBAO_BASE_URL = os.getenv("DOUBAO_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3")
-    DOUBAO_MODEL = os.getenv("DOUBAO_MODEL", "doubao-32k")
+    DOUBAO_MODEL = os.getenv("DOUBAO_MODEL", "doubao-1-5-pro-32k-250115")
     
     # 智谱 GLM
     ZHIPU_API_KEY = os.getenv("ZHIPU_API_KEY", "")

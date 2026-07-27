@@ -32,5 +32,5 @@ mkdir -p uploads
 # 6. 启动服务 (后台运行建议使用 pm2 或 systemd)
 echo "------------------------------------------------"
 echo "部署完成！可以使用以下命令启动服务："
-echo "source venv/bin/activate && uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+echo "source venv/bin/activate && uvicorn main:app --host 0.0.0.0 --port 8088 --reload"
 echo "------------------------------------------------"

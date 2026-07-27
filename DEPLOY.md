@@ -191,14 +191,14 @@ sudo journalctl -u echomind -f
 
 ```bash
 # Ubuntu ufw
-sudo ufw allow 8000/tcp
+sudo ufw allow 8088/tcp
 sudo ufw status
 
 # 或者 iptables
-sudo iptables -A INPUT -p tcp --dport 8000 -j ACCEPT
+sudo iptables -A INPUT -p tcp --dport 8088 -j ACCEPT
 ```
 
-> 如果服务器有云厂商的安全组（阿里云/腾讯云/AWS），还需要在控制台「安全组规则」里放行 8000 端口。
+> 如果服务器有云厂商的安全组（阿里云/腾讯云/AWS），还需要在控制台「安全组规则」里放行 8088 端口。
 
 ---
 
@@ -207,7 +207,7 @@ sudo iptables -A INPUT -p tcp --dport 8000 -j ACCEPT
 在**本机**浏览器访问：
 
 ```
-http://your-server-ip:8000/
+http://your-server-ip:8088/
 ```
 
 应返回：
@@ -218,7 +218,7 @@ http://your-server-ip:8000/
 测试登录接口：
 
 ```bash
-curl -X POST http://your-server-ip:8000/api/v1/auth/login \
+curl -X POST http://your-server-ip:8088/api/v1/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"admin","password":"123456"}'
 ```
@@ -232,13 +232,13 @@ curl -X POST http://your-server-ip:8000/api/v1/auth/login \
 管理后台的 API 地址写在 `frontend/api.js` 第 1 行：
 
 ```javascript
-const API_BASE = 'http://localhost:8000/api/v1';  // 本机开发
+const API_BASE = 'http://localhost:8088/api/v1';  // 本机开发
 ```
 
 **部署后需改成服务器地址**：
 
 ```javascript
-const API_BASE = 'http://your-server-ip:8000/api/v1';
+const API_BASE = 'http://your-server-ip:8088/api/v1';
 ```
 
 改完后，直接用浏览器打开 `frontend/files.html` 即可访问线上数据。
@@ -250,7 +250,7 @@ const API_BASE = 'http://your-server-ip:8000/api/v1';
 App 内置了服务器地址修改入口：**长按主界面「语录」标题** → 弹出设置输入框 → 填入：
 
 ```
-http://your-server-ip:8000
+http://your-server-ip:8088
 ```
 
 保存后重新上传录音即可走线上链路。
@@ -284,13 +284,21 @@ server {
     listen 80;
     server_name your-server-ip;  # 或域名
 
-    client_max_body_size 200M;   # 允许上传大文件
+    client_max_body_size 500M;   # 允许上传大文件（44 分钟录音实测约 43MB，留足余量）
 
     location / {
-        proxy_pass http://127.0.0.1:8000;
+        proxy_pass http://127.0.0.1:8088;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_read_timeout 300s;  # LLM 生成可能较慢，超时设长一点
+
+        # POST /api/v1/analyze 是同步阻塞接口：上传→ASR→LLM并发分析→生成分享页
+        # 一次请求内跑完，不会提前返回。App 端 OkHttp 的连接/读/写超时统一设为 1800s，
+        # 这里必须对齐同一上限，否则 Nginx 会在后端还在处理时提前断开连接，
+        # App 收到失败但后端仍在跑，造成"假失败 + 用户重复上传"。
+        # 如果以后把 /analyze 改成异步任务（提交后轮询结果），这三行超时可以调回默认值。
+        proxy_connect_timeout 60s;    # 连接后端本身很快，不需要设长
+        proxy_send_timeout 1800s;
+        proxy_read_timeout 1800s;
     }
 }
 ```
@@ -301,7 +309,7 @@ sudo nginx -t && sudo systemctl reload nginx
 sudo ufw allow 80/tcp
 ```
 
-配好后把 `frontend/api.js` 和 App 的服务器地址改为 `http://your-server-ip`（去掉 `:8000`）即可。
+配好后把 `frontend/api.js` 和 App 的服务器地址改为 `http://your-server-ip`（去掉 `:8088`）即可。
 
 ---
 
