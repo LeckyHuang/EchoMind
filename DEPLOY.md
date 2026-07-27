@@ -152,7 +152,8 @@ After=network.target
 [Service]
 User=root
 WorkingDirectory=/opt/echomind
-ExecStart=/opt/echomind/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8088 --workers 2
+# 必须为 1：分段任务的启动续跑扫描在多 worker 下会重复执行，且 SQLite 并发写会锁
+ExecStart=/opt/echomind/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8088 --workers 1
 Restart=always
 RestartSec=5
 StandardOutput=journal
