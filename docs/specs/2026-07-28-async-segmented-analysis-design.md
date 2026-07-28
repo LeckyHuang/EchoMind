@@ -69,6 +69,8 @@
 
 段级 ASR 状态复用 `AudioFile.upload_status`，不新建字段：`pending` → `processing` → `completed` / `failed`。
 
+⚠️ **不变量：merged 虚拟 AudioFile 也带 `session_id`，但 `segment_index` 为 NULL。** 因此**所有「按 session 捞段」的查询都必须加 `segment_index IS NOT NULL` 过滤**，否则合并记录会被当成一个「段」参与计数、拼接与到齐判断。这一条被两处独立踩中过（到齐检查、会话状态查询接口），是本设计最容易漏的坑。
+
 ### 4.2 接口设计
 
 全部挂在 `/api/v1` 下，Bearer Token 鉴权，归属当前用户。
@@ -155,7 +157,9 @@ UPDATE recording_sessions SET status='generating'
 - **停止录音**：调 `finalize` 提交总段数 + 用户选的分析类型。类型选择 UI 从「上传前」移到「停止录音时」，因为现在上传是自动的。
 - **轮询**：录音详情页每 10 秒轮询 `GET /api/v1/sessions/{id}`，展示「已转写 11/12 段」进度；`completed` 后停止轮询。仅在页面可见时轮询，退到后台即停。
 - **原生报告渲染**：新增 `ReportActivity`，用 RecyclerView 多 ViewType 渲染 `report_data` 的 sections 契约（`text` / `list` / `kv` / `tags` / `actions` 五种段落类型。契约的权威实现在后端 `routers/report_router.py` 的 `_body_generic()` 与前端 `frontend/report.js`，App 渲染器必须与之对齐）。`ReportWebViewActivity` 保留，作为老数据和分享页的入口。
-- **历史列表**：`MainActivity` 改为按 session 聚合展示，一次录音一行（含段数与状态），而不是每段一行。
+- **历史列表**：`MainActivity` 改为**双 Tab**。「录音会话」Tab 按 session 聚合展示，一次录音一行（含段数与状态）；「本地文件」Tab 保留原有的本地录音文件管理（播放 / 重命名 / 保存到手机 / 删除 / 手动上传入口）。轮询按 Tab 门控，仅「录音会话」Tab 可见时运行。
+
+  > **为什么是双 Tab**：本条原文只写了「改为按 session 聚合，一次录音一行」，实施时被照字面执行，连带把本地文件管理整块砍掉了（播放/重命名/保存/删除全失，`UploadFlowActivity` 沦为死代码），事后回滚补救。会话聚合解决的是「报告怎么归组」，与「本地音频文件怎么管理」是两件正交的事，不该互相替代。
 
 ## 5. 测试策略
 
