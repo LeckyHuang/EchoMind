@@ -275,8 +275,13 @@ async def check_and_finalize(session_id: str) -> bool:
         if sess.total_segments is None:
             return False
 
+        # 只捞真正的「段」：`_run_analysis` 建的虚拟 merged AudioFile 也挂同一个
+        # session_id，但 segment_index 为空。不排除它，续跑/重跑路径下它会被当成
+        # 一个段参与计数与拼接，且它初始 PROCESSING 会替幂等锁挡住并发重入
+        # （spec 4.1 已把这条记为显式不变量）。
         segments = db.query(AudioFile).filter(
-            AudioFile.session_id == session_id
+            AudioFile.session_id == session_id,
+            AudioFile.segment_index.isnot(None),
         ).order_by(AudioFile.segment_index).all()
 
         if len(segments) < sess.total_segments:
