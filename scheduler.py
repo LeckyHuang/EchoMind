@@ -15,7 +15,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.orm import Session
 
-from models import SessionLocal, AudioFile, SystemSetting
+from models import SessionLocal, AudioFile, RecordingSession, UploadStatus, SystemSetting
 from utils.file_utils import cleanup_old_files
 from config import settings
 
@@ -114,6 +114,11 @@ async def scheduled_cleanup():
         # 兜底：按 mtime 清理 uploads 目录中无 DB 记录的孤立文件
         await cleanup_old_files(expire_hours)
 
+        # 孤儿 session 清理（异步分段串联，2026-07-28，spec 4.4）
+        orphan_count = await cleanup_orphan_sessions()
+        if orphan_count:
+            logger.info(f"🕐 孤儿会话清理: {orphan_count} 个")
+
         # 记录清理日志
         log_msg = (
             f"✅ 清理完成 | 物理文件: {cleaned_physical} 个"
@@ -130,6 +135,51 @@ async def scheduled_cleanup():
         logger.error(f"❌ 定时清理任务异常: {e}")
     finally:
         db.close()
+
+
+#: 孤儿 session 判定阈值：finalize 从未被调用（App 崩溃/卸载）超过这个时长即标 failed（spec 4.4）
+ORPHAN_SESSION_EXPIRE_HOURS = 24
+
+
+async def cleanup_orphan_sessions(session_factory=SessionLocal) -> int:
+    """`recording` 状态且 `created_at` 早于 24 小时前的会话标记 `failed`，并清理其段音频物理文件。
+
+    `session_factory` 可注入（测试用临时库工厂），默认用生产 `SessionLocal`。
+    返回被清理的会话数。
+    """
+    db = session_factory()
+    cleaned = 0
+    try:
+        expire_time = datetime.utcnow() - timedelta(hours=ORPHAN_SESSION_EXPIRE_HOURS)
+        orphans = db.query(RecordingSession).filter(
+            RecordingSession.status == "recording",
+            RecordingSession.created_at <= expire_time,
+        ).all()
+
+        for sess in orphans:
+            segments = db.query(AudioFile).filter(
+                AudioFile.session_id == sess.session_id
+            ).all()
+            for seg in segments:
+                try:
+                    if seg.stored_filename:
+                        file_path = Path(settings.UPLOAD_DIR) / seg.stored_filename
+                        if file_path.is_file():
+                            file_path.unlink()
+                except Exception as e:
+                    logger.warning(f"孤儿会话清理：删除段音频失败 file_id={seg.file_id}: {e}")
+
+            sess.status = "failed"
+            sess.error_message = "录音未正常结束"
+            cleaned += 1
+
+        if cleaned:
+            db.commit()
+            logger.info(f"孤儿会话清理：{cleaned} 个 recording 会话标记 failed")
+    finally:
+        db.close()
+
+    return cleaned
 
 
 def start_scheduler():

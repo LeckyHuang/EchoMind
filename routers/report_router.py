@@ -27,6 +27,23 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/admin", tags=["报告编辑与分享"])
 
+# ==================== 非 admin 语义别名路由（异步分段串联，2026-07-28） ====================
+# `GET /api/v1/admin/reports/{id}`（routers/prompt_router.py 的 get_report）路径带 admin，
+# 但鉴权只按当前用户，语义有误导。这里加一条非 admin 前缀的别名路由，直接复用同一个
+# handler 函数（不复制逻辑），供 App 原生渲染取 report_data。旧路由原样保留。
+alias_router = APIRouter(prefix="/api/v1", tags=["报告编辑与分享"])
+
+
+@alias_router.get("/reports/{report_id}")
+async def get_report_alias(
+    report_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """`GET /api/v1/admin/reports/{report_id}` 的非 admin 别名，见 spec 4.2。"""
+    from routers.prompt_router import get_report as _admin_get_report
+    return await _admin_get_report(report_id, db, current_user)
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 PHOTOS_DIR = BASE_DIR / "uploads" / "photos"
 SHARES_DIR = BASE_DIR / "shares"

@@ -31,8 +31,9 @@ from routers.file_router import router as file_router
 from routers.prompt_router import router as prompt_router
 from routers.user_router import router as user_router
 from routers.settings_router import router as settings_router
-from routers.report_router import router as report_router
+from routers.report_router import router as report_router, alias_router as report_alias_router
 from routers.tasktype_router import router as tasktype_router
+from routers.session_router import router as session_router
 
 # 简单内存速率限制（per-IP，单进程有效）
 _upload_counters: dict = defaultdict(list)
@@ -84,7 +85,9 @@ app.include_router(prompt_router)
 app.include_router(user_router)
 app.include_router(settings_router)
 app.include_router(report_router)
+app.include_router(report_alias_router)
 app.include_router(tasktype_router)
+app.include_router(session_router)
 if _OBS_ROUTER:
     app.include_router(_OBS_ROUTER)
 
@@ -458,6 +461,14 @@ async def startup_event():
     finally:
         _db.close()
     start_scheduler()
+
+    # 分段流水线启动续跑（异步分析 + 录音分段串联，2026-07-28）
+    # recover_pending_on_startup 内部只是把待处理段/会话 create_task 出去，本身很快返回，
+    # 不会把这里的 await 卡在 ASR/LLM 真实调用上。
+    from services.segment_pipeline import recover_pending_on_startup
+    recovery_stats = await recover_pending_on_startup()
+    logger.info(f"分段流水线启动续跑: {recovery_stats}")
+
     logger.info("EchoMind 智能录音分析平台 v1.0 启动完成")
 
 
