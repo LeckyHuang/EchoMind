@@ -321,3 +321,63 @@ async def test_r13_zero_segments_edge(env):
     mk_sess(env, status="analyzing", total=0)
     r = await pipeline.check_and_finalize("S")
     print("RESULT:", r, "status=", sess(env).status, "llm=", env.llm.n)
+
+
+# ---------- 不变量：抢锁前零 await（静态 AST 断言） ----------
+#
+# 复检实证：一旦 `check_and_finalize` 在抢到幂等锁之前出现让出点，N 个协程会各自
+# 持有一个已开启事务的 SQLite 连接同时 UPDATE，同线程同步驱动下锁等待会把整个事件
+# 循环堵死（实测 0.05s → 30s 超时被杀）。违反这条不变量的后果是**进程挂死**，不是
+# 多扣一次 LLM 费。原先它只靠注释守，这里把它变成可执行断言。
+
+import ast  # noqa: E402
+import inspect  # noqa: E402
+
+
+def _check_and_finalize_ast():
+    src = inspect.getsource(pipeline)
+    tree = ast.parse(src)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)) and \
+                node.name == "check_and_finalize":
+            return node
+    raise AssertionError("未找到 check_and_finalize 定义")
+
+
+def _lock_stmt(func):
+    """定位幂等锁那条条件 UPDATE（赋值给 rowcount 的语句）。"""
+    hits = [
+        n for n in ast.walk(func)
+        if isinstance(n, ast.Assign)
+        and any(isinstance(t, ast.Name) and t.id == "rowcount" for t in n.targets)
+    ]
+    assert len(hits) == 1, (
+        f"check_and_finalize 里 rowcount 赋值有 {len(hits)} 处，"
+        "本断言的定位假设已失效，请同步修正测试"
+    )
+    return hits[0]
+
+
+def test_no_await_before_idempotency_lock():
+    """抢锁前不得存在任何 await（守活性 + 幂等，见上方注释）。"""
+    func = _check_and_finalize_ast()
+    lock = _lock_stmt(func)
+    lock_end = lock.end_lineno
+
+    awaits = [n for n in ast.walk(func) if isinstance(n, ast.Await)]
+    # 反证：函数里本来就该有 await（_run_analysis），否则说明是在对空集合断言
+    assert awaits, "check_and_finalize 里一个 await 都没有，断言失去意义"
+
+    early = sorted(n.lineno for n in awaits if n.lineno <= lock_end)
+    assert not early, (
+        "「抢锁前零 await」不变量被破坏：条件 UPDATE（源码行 "
+        f"{lock.lineno}-{lock_end}）之前/之内存在 await，行号 {early}。"
+        "后果是 N 个协程各持已开事务的连接争 SQLite 写锁，事件循环整个堵死。"
+    )
+
+
+def test_lock_update_has_status_guard():
+    """条件 UPDATE 必须带 status=='analyzing' 过滤，否则跨进程下不是锁。"""
+    func = _check_and_finalize_ast()
+    src = ast.unparse(_lock_stmt(func))
+    assert "STATUS_ANALYZING" in src, f"条件 UPDATE 缺 status 过滤：{src}"
