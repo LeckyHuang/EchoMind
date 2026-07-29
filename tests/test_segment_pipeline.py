@@ -428,6 +428,38 @@ async def test_placeholder_uses_segment_index_not_position(env):
 
 
 @pytest.mark.asyncio
+async def test_empty_asr_text_distinct_from_failed(env):
+    """ASR 调用成功但文本为空（纯静音段）与真正转写失败要走不同占位文案，
+    不能都留痕成"转写失败"误导用户。"""
+    make_session(env)
+    env.asr.behaviours = {
+        "seg0_": "内容零",
+        "seg1_": {"success": True, "text": "", "error": None},  # 静音，ASR 本身成功
+        "seg2_": {"success": False, "text": "", "error": "厂商 500"},  # 真失败
+    }
+    ids = [add_segment(env, "s-1", i) for i in range(3)]
+    await pipeline.finalize_session("s-1", 3, DEFAULT_TYPES)
+    for af_id in ids:
+        await pipeline.submit_segment_asr(af_id)
+
+    text = merged_text_of(env)
+    assert "[片段2：无有效语音内容]" in text, f"实际拼接={text!r}"
+    assert "[片段3：转写失败，内容缺失]" in text, f"实际拼接={text!r}"
+
+    db = env.SessionLocal()
+    seg1 = db.query(AudioFile).filter(
+        AudioFile.session_id == "s-1", AudioFile.segment_index == 1
+    ).first()
+    seg2 = db.query(AudioFile).filter(
+        AudioFile.session_id == "s-1", AudioFile.segment_index == 2
+    ).first()
+    # 静音段本身是 ASR 成功，段状态应为 completed，不是 failed
+    assert seg1.upload_status == UploadStatus.COMPLETED.value
+    assert seg2.upload_status == UploadStatus.FAILED.value
+    db.close()
+
+
+@pytest.mark.asyncio
 async def test_all_segments_failed(env):
     """全部段失败：session 转 failed，LLM 一次都不调。"""
     make_session(env)

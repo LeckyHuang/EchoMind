@@ -347,8 +347,12 @@ async def _run_analysis(db, session_id: str, segments: list) -> None:
     parts = []
     for seg in segments:
         label = seg.segment_index + 1
-        if seg.upload_status == UploadStatus.FAILED.value or not seg.asr_text:
+        if seg.upload_status == UploadStatus.FAILED.value:
             parts.append(f"[片段{label}：转写失败，内容缺失]")
+        elif not seg.asr_text:
+            # ASR 调用成功但返回空文本（纯静音段等）：与真正的转写失败区分开，
+            # 避免误导用户以为出了故障。
+            parts.append(f"[片段{label}：无有效语音内容]")
         else:
             parts.append(f"[片段{label}]\n{seg.asr_text}")
     merged_text = "\n\n".join(parts)

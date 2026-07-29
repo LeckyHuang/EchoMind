@@ -286,7 +286,7 @@ async def test_r10_all_failed_no_llm(env):
 
 @pytest.mark.asyncio
 async def test_r11_empty_asr_text_treated_as_missing(env):
-    """段成功但文本为空（静音）→ 目前也打成 '转写失败' 占位（记录实际行为）。"""
+    """段成功但文本为空（静音）→ 打成 '无有效语音内容' 占位，与真正的转写失败区分开。"""
     env.asr.behaviour = {"S_g0.m4a": {"success": True, "text": "", "error": None}}
     mk_sess(env)
     ids = [mk_seg(env, "S", i) for i in range(2)]
@@ -300,7 +300,8 @@ async def test_r11_empty_asr_text_treated_as_missing(env):
     st = seg0.upload_status
     db.close()
     assert st == UploadStatus.COMPLETED.value
-    assert "[片段1：转写失败，内容缺失]" in txt, f"实际拼接={txt!r}"
+    assert "[片段1：无有效语音内容]" in txt, f"实际拼接={txt!r}"
+    assert "转写失败" not in txt, f"空文本段不应留痕为转写失败：{txt!r}"
 
 
 # ---------- Q5: 并发上限 ----------
