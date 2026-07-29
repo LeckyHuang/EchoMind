@@ -405,6 +405,29 @@ async def test_one_segment_asr_failed_degrades(env):
 
 
 @pytest.mark.asyncio
+async def test_placeholder_uses_segment_index_not_position(env):
+    """段号有洞（0, 1, 3；段 2 从未落库）时，占位编号必须用真实 segment_index+1，
+    不能用列表位置序号——否则用户看到的「片段N」会和真实段号错位。"""
+    make_session(env)
+    env.asr.behaviours = {
+        "seg0_": "内容零",
+        "seg1_": {"success": False, "text": "", "error": "厂商 500"},
+        "seg3_": "内容三",
+    }
+    ids = [add_segment(env, "s-1", i) for i in (0, 1, 3)]
+    await pipeline.finalize_session("s-1", 3, DEFAULT_TYPES)
+    for af_id in ids:
+        await pipeline.submit_segment_asr(af_id)
+
+    text = merged_text_of(env)
+    # 真实段号 1（位置序号本应是 2）转写失败 → 占位必须写「片段2」
+    assert "[片段2：转写失败，内容缺失]" in text, f"实际拼接={text!r}"
+    # 真实段号 3（位置序号本应是 3）→ 占位/正文必须写「片段4」，不是「片段3」
+    assert "[片段4]" in text, f"实际拼接={text!r}"
+    assert "[片段3" not in text, f"用了位置序号而非 segment_index：{text!r}"
+
+
+@pytest.mark.asyncio
 async def test_all_segments_failed(env):
     """全部段失败：session 转 failed，LLM 一次都不调。"""
     make_session(env)

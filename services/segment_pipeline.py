@@ -341,13 +341,16 @@ async def _run_analysis(db, session_id: str, segments: list) -> None:
         RecordingSession.session_id == session_id
     ).first()
 
-    # 1. 按 segment_index 排序拼接，失败段插占位（spec 4.4 缺段降级）
+    # 1. 按 segment_index 排序拼接，失败段插占位（spec 4.4 缺段降级）。
+    #    编号用 seg.segment_index+1 而非位置序号：段号有洞时（例如某段上传
+    #    从未落库）两者会错位，用户看到的「片段N」必须对应真实段号。
     parts = []
-    for i, seg in enumerate(segments):
+    for seg in segments:
+        label = seg.segment_index + 1
         if seg.upload_status == UploadStatus.FAILED.value or not seg.asr_text:
-            parts.append(f"[片段{i+1}：转写失败，内容缺失]")
+            parts.append(f"[片段{label}：转写失败，内容缺失]")
         else:
-            parts.append(f"[片段{i+1}]\n{seg.asr_text}")
+            parts.append(f"[片段{label}]\n{seg.asr_text}")
     merged_text = "\n\n".join(parts)
 
     # 2. 创建合并记录（虚拟 AudioFile，无实际音频文件）
