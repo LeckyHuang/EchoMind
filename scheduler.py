@@ -157,8 +157,12 @@ async def cleanup_orphan_sessions(session_factory=SessionLocal) -> int:
         ).all()
 
         for sess in orphans:
+            # spec 4.1 不变量：merged 虚拟 AudioFile 也带 session_id 但
+            # segment_index 为空，按 session 捞段必须过滤掉它。这里删的是
+            # 真实段的物理文件，混进 merged 记录会把它当成一个段处理。
             segments = db.query(AudioFile).filter(
-                AudioFile.session_id == sess.session_id
+                AudioFile.session_id == sess.session_id,
+                AudioFile.segment_index.isnot(None),
             ).all()
             for seg in segments:
                 try:
