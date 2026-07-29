@@ -131,14 +131,17 @@ session:  recording -> analyzing -> generating -> completed | failed
 
 `recording → analyzing` 只由 finalize 触发；`analyzing → generating → completed` 只由到齐检查触发。
 
-**关于 `generating`**：`finalize` 与「最后一段 ASR 完成」是两个互相独立、可能同时发生的事件，都会调用到齐检查，而分析必须且只能跑一轮（多跑一轮就多扣一次 LLM 费）。幂等锁的实现是条件原子推进：
+**关于 `generating`**：`finalize` 与「最后一段 ASR 完成」是两个互相独立、可能同时发生的事件，都会调用到齐检查，而分析必须且只能跑一轮（多跑一轮就多扣一次 LLM 费）。幂等锁由两道防线叠加，作用不同：
 
-```sql
-UPDATE recording_sessions SET status='generating'
- WHERE session_id=? AND status='analyzing'
-```
+1. **单进程互斥的真正来源是「前置状态读检查 + 抢锁前零 await」**：`check_and_finalize` 从读 `session.status` 到把状态改成 `generating` 并 `commit`，中间不含任何 `await`。因为没有让出点，这一段在单事件循环内是原子的——后到的调用一定会看到已经被改过的状态。这条不变量若被破坏（例如在抢锁前插入一次 `await`），后果不止是幂等失效多扣一次 LLM 费：多个协程各自持有已开事务的 SQLite 连接同时抢锁，会把事件循环整个堵死、**进程挂死**。`tests/test_segment_timing.py` 用 AST 断言守住这条不变量，防止后人在抢锁前插入 `await`。
+2. **条件原子推进是跨进程/跨线程下的保险**（单进程下是冗余的第二道防线）：
 
-只有 `rowcount == 1` 的那一次调用继续往下调 LLM，其余一律返回 False。这条 UPDATE 必须在**任何 `await` 之前**完成并提交——单事件循环内因此不存在「检查」与「占位」之间的让出点。
+   ```sql
+   UPDATE recording_sessions SET status='generating'
+    WHERE session_id=? AND status='analyzing'
+   ```
+
+   只有 `rowcount == 1` 的那一次调用继续往下调 LLM，其余一律返回 False。本方案已强制 workers=1，但数据库层并未禁止多进程接入；一旦有人在这个前提之外多开 worker，第 1 条防线不再成立，这句条件 UPDATE 才是唯一还生效的兜底。
 
 **重启续跑必须把 `generating` 退回 `analyzing`**：`generating` 表示「进了 LLM 但没跑完就重启」，若不退回，到齐检查会因状态不是 `analyzing` 直接返回，该会话永远卡死。
 

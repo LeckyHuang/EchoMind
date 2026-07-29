@@ -17,14 +17,28 @@
 无论谁先谁后、哪怕同一轮事件循环里同时发生，LLM 分析必须且只能跑一轮
 （多跑一轮 = 多扣一次费）。
 
-锁由 `recording_sessions.status` 的**条件原子推进**实现：
+三道防线，各自的作用不同，不要混为一谈：
 
-    UPDATE recording_sessions SET status='generating'
-     WHERE session_id=? AND status='analyzing'
+1. **前置读检查 + 抢锁前零 await**（`:273` 附近的 `if sess.status != STATUS_ANALYZING`
+   到条件 UPDATE 之间不含任何 `await`）——这才是**单进程单事件循环下真正的互斥
+   来源**。因为中间没有让出点，`check_and_finalize` 从「读状态」到「改状态并
+   commit」在事件循环里是原子的一段，后到的调用一定会看到已经被改过的状态。
+   这条不变量一旦被破坏（比如抢锁前插了一个 `await asyncio.sleep(0)`），后果
+   不只是幂等失效多扣一次 LLM 费——`tests/test_segment_timing.py` 曾实测：多个
+   协程各自持有已开事务的 SQLite 连接同时抢锁，会把事件循环整个堵死，**进程
+   挂死**。`tests/test_segment_timing.py` 里的 AST 断言就是防止后人在这段代码
+   前插入 `await` 而破坏这条不变量。
+2. **条件原子推进**（下面这句 UPDATE）是跨进程/跨线程下的保险：
 
-只有 rowcount==1 的那一次调用拿到锁，其余全部 return False。这一步在**任何
-`await` 之前**完成并 commit，因此在单事件循环内不存在检查与占位之间的让出点；
-条件 UPDATE 又让它在跨进程/跨线程下同样成立（虽然本方案已强制 workers=1）。
+       UPDATE recording_sessions SET status='generating'
+        WHERE session_id=? AND status='analyzing'
+
+   只有 rowcount==1 的那一次调用拿到锁，其余全部 return False。单进程下，因
+   为第 1 条已经挡住了并发重入，这句 UPDATE 大多数时候是冗余的第二保险；但
+   本方案并未在数据库层禁止多进程接入，一旦哪天 workers 不再是 1（即便 spec
+   已强制单 worker），这句 UPDATE 才是唯一还生效的防线。
+3. **`recover_pending_on_startup` 的 `generating → analyzing` 复位**：与前两
+   条无关，解决的是"进了 LLM 但没跑完就重启"导致会话永久卡死的问题，见下段。
 
 `generating` 是 `analyzing` 与 `completed` 之间的中间态：`analyzing` 表示「等段
 到齐」，`generating` 表示「已进入 LLM 分析」。重启续跑必须把 `generating` 退回
