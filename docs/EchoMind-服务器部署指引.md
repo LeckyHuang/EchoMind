@@ -68,13 +68,13 @@ CORS_ORIGINS=*
 
 # ==================== ASR 配置 ====================
 ASR_PROVIDER=doubao
-DOUBAO_APP_ID=2244278624
-DOUBAO_ACCESS_KEY=8rMZhl2nzdWv56dzG9657KrWsahJ6t3T
-DOUBAO_SECRET_KEY=rDJfh8iRPadQI7sCNsbmkGxFeBgZzktg
+DOUBAO_APP_ID=<你的火山引擎 APP ID>
+DOUBAO_ACCESS_KEY=<你的火山引擎 Access Key>
+DOUBAO_SECRET_KEY=<你的火山引擎 Secret Key>
 
 # ==================== LLM 配置 ====================
 LLM_PROVIDER=qwen
-QWEN_API_KEY=sk-15aacf485c9247a1afb4c22f32c4f421
+QWEN_API_KEY=<你的阿里云百炼 API Key，形如 sk-xxxx>
 QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 QWEN_MODEL=qwen-plus
 
@@ -84,9 +84,12 @@ MINIMAX_BASE_URL=https://api.minimax.chat/v1
 MINIMAX_MODEL=MiniMax-M2.5
 
 # ==================== JWT 密钥 ====================
-SECRET_KEY=56a57a2dd478028fc9af24f34cc02a89925719851b9421733d411f9d0b2a0e84
-JWT_SECRET_KEY=56a57a2dd478028fc9af24f34cc02a89925719851b9421733d411f9d0b2a0e84
+# 用 openssl rand -hex 32 现场生成，切勿照抄任何文档里的示例值
+SECRET_KEY=<openssl rand -hex 32 的输出>
+JWT_SECRET_KEY=<同上，与 SECRET_KEY 填相同值>
 ```
+
+> ⚠️ 以上全部为占位符，需替换成你自己的真实值。真实密钥只写进服务器上的 `.env`，**不要回填到本文档或任何提交进 git 的文件里**。
 
 ---
 
